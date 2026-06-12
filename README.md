@@ -38,7 +38,7 @@ The backend defaults to `sqlite://../data/toolpassport.db` when started from
 `backend/`; set `DATABASE_URL` to override it. SQLx runs embedded SQLite
 migrations on startup. The current Trust Core slice implements:
 
-- `POST /api/runs`
+- `POST /api/runs` — create an audit run bound to an existing Tool (accepts `tool_id`)
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
 - `POST /api/runs/:run_id/events`
@@ -72,11 +72,16 @@ three-state identity resolution ported from Python to pure Rust, and
 approved source migration. External identifier uniqueness is enforced at the
 database level via a composite primary key.
 
+Stage 2.3 binds Run creation to the Tool Registry: `POST /api/runs` now
+accepts a `tool_id` that must reference an existing Tool, and freezes the
+canonical URL, name, and type as an immutable audit snapshot. A new
+`runs.tool_id` column (migration `0003`) ensures every new Run is anchored to
+a stable tool identity.
+
 The minimal Foundry contract groups commitments by `toolId -> runId` and
-records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. Run
-binding (`runs.tool_id`), runtime Profile selector, orchestrator subprocess,
-SSE, evidence, artifacts, passports, approval records, and onchain writes
-are not implemented yet.
+records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
+runtime Profile selector, orchestrator subprocess, SSE, evidence, artifacts,
+passports, approval records, and onchain writes are not implemented yet.
 
 Product scope and architecture are tracked in:
 

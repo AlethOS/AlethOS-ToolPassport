@@ -7,7 +7,7 @@ use crate::{
     domain::{
         AddIdentifierRequest, AppendRunEventRequest, CreateRunRequest, CreateToolRequest,
         ExternalIdentifier, ReasonCode, ResolutionResponse, ResolutionStatus, ResolveToolRequest,
-        Run, RunDetails, RunEvent, RunEventType, RunStatus, Tool,
+        Run, RunDetails, RunEvent, RunEventType, RunStatus, Tool, ToolInput,
     },
     repository::{Repository, RepositoryError},
 };
@@ -53,11 +53,26 @@ impl TrustCoreService {
     pub async fn create_run(&self, request: CreateRunRequest) -> Result<Run, ServiceError> {
         validate_create_run(&request)?;
 
+        let tool_id = request.tool_id.trim().to_owned();
+
+        // Load and freeze a snapshot from the Tool Registry.
+        let tool = self
+            .repository
+            .get_tool(&tool_id)
+            .await?
+            .ok_or(ServiceError::ToolNotFound)?;
+
         let now = Utc::now();
         let run = Run {
             run_id: Uuid::new_v4(),
             goal: request.goal.trim().to_owned(),
-            tool: request.tool,
+            tool_id: tool.tool_id.clone(),
+            canonical_url: tool.canonical_url.clone(),
+            tool: ToolInput {
+                name: tool.name.clone(),
+                tool_type: tool.tool_type.as_str().to_owned(),
+                urls: vec![tool.canonical_url.clone()],
+            },
             status: RunStatus::Pending,
             current_node: None,
             created_at: now,
@@ -485,17 +500,10 @@ fn parse_run_id(run_id: &str) -> Result<Uuid, ServiceError> {
 
 fn validate_create_run(request: &CreateRunRequest) -> Result<(), ServiceError> {
     validate_required("goal", &request.goal, 4_000)?;
-    validate_required("tool.name", &request.tool.name, 200)?;
-    validate_required("tool.tool_type", &request.tool.tool_type, 100)?;
+    validate_required("tool_id", &request.tool_id, 200)?;
 
-    if request.tool.urls.len() > 20 {
-        return Err(ServiceError::InvalidRequest(
-            "tool.urls must contain at most 20 entries".to_owned(),
-        ));
-    }
-
-    for url in &request.tool.urls {
-        validate_required("tool.urls[]", url, 2_048)?;
+    if !normalizer::validate_tool_id_format(request.tool_id.trim()) {
+        return Err(ServiceError::InvalidToolIdFormat);
     }
 
     Ok(())

@@ -51,14 +51,16 @@ impl Repository {
         sqlx::query(
             r#"
             INSERT INTO runs (
-                run_id, goal, tool_name, tool_type, tool_urls, status,
-                current_node, created_at, updated_at
+                run_id, goal, tool_id, canonical_url, tool_name, tool_type,
+                tool_urls, status, current_node, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(run.run_id.to_string())
         .bind(&run.goal)
+        .bind(&run.tool_id)
+        .bind(&run.canonical_url)
         .bind(&run.tool.name)
         .bind(&run.tool.tool_type)
         .bind(tool_urls)
@@ -93,8 +95,8 @@ impl Repository {
     pub async fn list_runs(&self) -> Result<Vec<Run>, RepositoryError> {
         let rows = sqlx::query_as::<_, RunRow>(
             r#"
-            SELECT run_id, goal, tool_name, tool_type, tool_urls, status,
-                   current_node, created_at, updated_at
+            SELECT run_id, goal, tool_id, canonical_url, tool_name, tool_type,
+                   tool_urls, status, current_node, created_at, updated_at
             FROM runs
             ORDER BY created_at DESC, run_id DESC
             "#,
@@ -108,8 +110,8 @@ impl Repository {
     pub async fn get_run(&self, run_id: Uuid) -> Result<Option<Run>, RepositoryError> {
         let row = sqlx::query_as::<_, RunRow>(
             r#"
-            SELECT run_id, goal, tool_name, tool_type, tool_urls, status,
-                   current_node, created_at, updated_at
+            SELECT run_id, goal, tool_id, canonical_url, tool_name, tool_type,
+                   tool_urls, status, current_node, created_at, updated_at
             FROM runs
             WHERE run_id = ?
             "#,
@@ -472,6 +474,8 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), RepositoryError> {
 struct RunRow {
     run_id: String,
     goal: String,
+    tool_id: String,
+    canonical_url: String,
     tool_name: String,
     tool_type: String,
     tool_urls: String,
@@ -488,6 +492,8 @@ impl TryFrom<RunRow> for Run {
         Ok(Self {
             run_id: parse_uuid(&row.run_id)?,
             goal: row.goal,
+            tool_id: row.tool_id,
+            canonical_url: row.canonical_url,
             tool: ToolInput {
                 name: row.tool_name,
                 tool_type: row.tool_type,
