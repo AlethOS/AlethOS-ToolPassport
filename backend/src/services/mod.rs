@@ -5,10 +5,14 @@ use uuid::Uuid;
 
 use crate::{
     domain::{
-        AppendRunEventRequest, CreateRunRequest, Run, RunDetails, RunEvent, RunEventType, RunStatus,
+        AddIdentifierRequest, AppendRunEventRequest, CreateRunRequest, CreateToolRequest,
+        ExternalIdentifier, ReasonCode, ResolutionResponse, ResolutionStatus, ResolveToolRequest,
+        Run, RunDetails, RunEvent, RunEventType, RunStatus, Tool,
     },
     repository::{Repository, RepositoryError},
 };
+
+mod normalizer;
 
 #[derive(Debug, Error)]
 pub enum ServiceError {
@@ -20,6 +24,18 @@ pub enum ServiceError {
     RunNotFound,
     #[error("{0}")]
     Conflict(String),
+    #[error("tool not found")]
+    ToolNotFound,
+    #[error("invalid tool ID format")]
+    InvalidToolIdFormat,
+    #[error("tool already exists")]
+    ToolAlreadyExists,
+    #[error("external identifier already claimed by {0}")]
+    IdentifierAlreadyClaimed(String),
+    #[error("invalid URL: {0}")]
+    InvalidUrl(String),
+    #[error("invalid intake version")]
+    InvalidIntakeVersion,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
 }
@@ -119,6 +135,238 @@ impl TrustCoreService {
                 RepositoryError::RunStateChanged => ServiceError::Conflict(
                     "run state changed while appending the event; reload and retry".to_owned(),
                 ),
+                other => ServiceError::Repository(other),
+            })
+    }
+
+    // ── Tool Registry ─────────────────────────────────────────────
+
+    pub async fn create_tool(&self, request: CreateToolRequest) -> Result<Tool, ServiceError> {
+        validate_create_tool(&request)?;
+
+        let now = Utc::now();
+        let tool = Tool {
+            tool_schema_version: "0.1.0",
+            tool_id: request.tool_id.trim().to_owned(),
+            name: request.name.trim().to_owned(),
+            tool_type: request.tool_type,
+            canonical_url: request.canonical_url.trim().to_owned(),
+            external_identifiers: request.external_identifiers,
+            aliases: request.aliases,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.repository
+            .create_tool(&tool)
+            .await
+            .map_err(|error| match error {
+                RepositoryError::UniqueViolation => ServiceError::ToolAlreadyExists,
+                other => ServiceError::Repository(other),
+            })
+    }
+
+    pub async fn get_tool(&self, tool_id: &str) -> Result<Tool, ServiceError> {
+        self.repository
+            .get_tool(tool_id)
+            .await?
+            .ok_or(ServiceError::ToolNotFound)
+    }
+
+    pub async fn list_tools(&self) -> Result<Vec<Tool>, ServiceError> {
+        self.repository.list_tools().await.map_err(Into::into)
+    }
+
+    pub async fn resolve_tool(
+        &self,
+        request: ResolveToolRequest,
+    ) -> Result<ResolutionResponse, ServiceError> {
+        if request.intake_version != "0.1.0" {
+            return Err(ServiceError::InvalidIntakeVersion);
+        }
+        validate_required("name", &request.name, 200)?;
+
+        // Normalize all URLs, tracking invalid ones.
+        let mut normalized_by_key: Vec<(String, normalizer::NormalizedIdentifier)> = Vec::new();
+        let mut invalid_url = false;
+
+        for raw_url in &request.urls {
+            match normalizer::normalize_url(raw_url) {
+                Some(normalized) => {
+                    let key = normalized.key();
+                    if !normalized_by_key.iter().any(|(k, _)| k == &key) {
+                        normalized_by_key.push((key, normalized));
+                    }
+                }
+                None => invalid_url = true,
+            }
+        }
+
+        // Sort by key for deterministic output.
+        normalized_by_key.sort_by(|a, b| a.0.cmp(&b.0));
+        let normalized_identifiers: Vec<ExternalIdentifier> = normalized_by_key
+            .iter()
+            .map(|(_, n)| n.to_external_identifier())
+            .collect();
+
+        // Find which existing tools own any of the normalized identifier keys.
+        let keys: Vec<String> = normalized_by_key.iter().map(|(k, _)| k.clone()).collect();
+        let matched_tools = self.repository.find_tools_by_identifiers(&keys).await?;
+        let matched_tool_ids: std::collections::HashSet<String> =
+            matched_tools.iter().map(|t| t.tool_id.clone()).collect();
+
+        // Find tools whose name or aliases match.
+        let name_candidates = self.repository.find_tools_by_name(&request.name).await?;
+        let name_candidate_ids: std::collections::HashSet<String> =
+            name_candidates.iter().map(|t| t.tool_id.clone()).collect();
+
+        let candidate_tool_ids: Vec<String> = {
+            let mut all: Vec<String> = matched_tool_ids.iter().cloned().collect();
+            all.extend(name_candidate_ids.iter().cloned());
+            all.sort();
+            all.dedup();
+            all
+        };
+
+        // Decision tree — direct port of Python resolve_identity().
+        if invalid_url {
+            return Ok(build_resolution(
+                ResolutionStatus::NeedsReview,
+                None,
+                normalized_identifiers,
+                candidate_tool_ids,
+                &[ReasonCode::InvalidOrAmbiguousUrl],
+            ));
+        }
+        if matched_tool_ids.len() > 1 {
+            return Ok(build_resolution(
+                ResolutionStatus::NeedsReview,
+                None,
+                normalized_identifiers,
+                candidate_tool_ids,
+                &[ReasonCode::ConflictingExistingIdentifiers],
+            ));
+        }
+        if matched_tool_ids.len() == 1 {
+            let matched_id = matched_tool_ids.iter().next().unwrap();
+            // Check for unmatched keys.
+            let owned_keys: std::collections::HashSet<String> = matched_tools
+                .iter()
+                .flat_map(|t| t.external_identifiers.iter())
+                .map(|id| format!("{}:{}", id.namespace, id.value))
+                .collect();
+            let unmatched: bool = keys.iter().any(|k| !owned_keys.contains(k));
+            if unmatched {
+                return Ok(build_resolution(
+                    ResolutionStatus::NeedsReview,
+                    None,
+                    normalized_identifiers,
+                    candidate_tool_ids,
+                    &[ReasonCode::AdditionalIdentifierRequiresReview],
+                ));
+            }
+            return Ok(build_resolution(
+                ResolutionStatus::Resolved,
+                Some(matched_id.clone()),
+                normalized_identifiers,
+                candidate_tool_ids,
+                &[ReasonCode::ExistingIdentifierMatch],
+            ));
+        }
+        if normalized_identifiers.is_empty() {
+            let reason = if !name_candidate_ids.is_empty() {
+                ReasonCode::NameMatchOnly
+            } else {
+                ReasonCode::NameOnly
+            };
+            return Ok(build_resolution(
+                ResolutionStatus::NeedsReview,
+                None,
+                normalized_identifiers,
+                candidate_tool_ids,
+                &[reason],
+            ));
+        }
+        if normalized_identifiers.len() > 1 {
+            return Ok(build_resolution(
+                ResolutionStatus::NeedsReview,
+                None,
+                normalized_identifiers,
+                candidate_tool_ids,
+                &[ReasonCode::MultipleStrongIdentifiers],
+            ));
+        }
+        if !name_candidate_ids.is_empty() {
+            return Ok(build_resolution(
+                ResolutionStatus::NeedsReview,
+                None,
+                normalized_identifiers,
+                candidate_tool_ids,
+                &[ReasonCode::PossibleForkOrSourceMigration],
+            ));
+        }
+
+        let proposed_tool_id = normalized_by_key[0].0.clone();
+        Ok(build_resolution(
+            ResolutionStatus::CreateCandidate,
+            Some(proposed_tool_id),
+            normalized_identifiers,
+            candidate_tool_ids,
+            &[ReasonCode::NewStrongIdentifier],
+        ))
+    }
+
+    pub async fn add_identifier(
+        &self,
+        tool_id: &str,
+        request: AddIdentifierRequest,
+    ) -> Result<Tool, ServiceError> {
+        // Verify the tool exists.
+        let existing = self.get_tool(tool_id).await?;
+
+        // Validate the new identifier is in canonical form.
+        let normalized =
+            normalizer::normalize_url(&request.identifier.canonical_url).ok_or_else(|| {
+                ServiceError::InvalidUrl(format!(
+                    "identifier canonical_url is not a valid strong URL: {}",
+                    request.identifier.canonical_url
+                ))
+            })?;
+        let expected_key = format!(
+            "{}:{}",
+            request.identifier.namespace, request.identifier.value
+        );
+        if normalized.key() != expected_key {
+            return Err(ServiceError::InvalidRequest(
+                "identifier namespace:value does not match its canonical_url normalization"
+                    .to_owned(),
+            ));
+        }
+
+        // Check it's not already owned by another tool.
+        let existing_owners = self
+            .repository
+            .find_tools_by_identifiers(&[expected_key])
+            .await?;
+        if existing_owners
+            .iter()
+            .any(|t| t.tool_id != existing.tool_id)
+        {
+            let claimed_by = existing_owners
+                .iter()
+                .find(|t| t.tool_id != existing.tool_id)
+                .map(|t| t.tool_id.clone())
+                .unwrap_or_default();
+            return Err(ServiceError::IdentifierAlreadyClaimed(claimed_by));
+        }
+
+        self.repository
+            .add_external_id(tool_id, &request.identifier, Utc::now())
+            .await
+            .map_err(|error| match error {
+                RepositoryError::UniqueViolation => {
+                    ServiceError::IdentifierAlreadyClaimed(existing.tool_id.clone())
+                }
                 other => ServiceError::Repository(other),
             })
     }
@@ -270,4 +518,110 @@ fn validate_required(field: &str, value: &str, max_length: usize) -> Result<(), 
         )));
     }
     Ok(())
+}
+
+fn validate_create_tool(request: &CreateToolRequest) -> Result<(), ServiceError> {
+    if !normalizer::validate_tool_id_format(&request.tool_id) {
+        return Err(ServiceError::InvalidToolIdFormat);
+    }
+
+    validate_required("name", &request.name, 200)?;
+    validate_required("canonical_url", &request.canonical_url, 2_048)?;
+
+    if request.external_identifiers.is_empty() {
+        return Err(ServiceError::InvalidRequest(
+            "external_identifiers must contain at least one entry".to_owned(),
+        ));
+    }
+    if request.external_identifiers.len() > 20 {
+        return Err(ServiceError::InvalidRequest(
+            "external_identifiers must contain at most 20 entries".to_owned(),
+        ));
+    }
+
+    // Each identifier must be in canonical form.
+    for (index, identifier) in request.external_identifiers.iter().enumerate() {
+        let normalized = normalizer::normalize_url(&identifier.canonical_url).ok_or_else(|| {
+            ServiceError::InvalidUrl(format!(
+                "external_identifiers[{index}].canonical_url is not a valid strong URL"
+            ))
+        })?;
+        let expected_key = format!("{}:{}", identifier.namespace, identifier.value);
+        if normalized.key() != expected_key {
+            return Err(ServiceError::InvalidRequest(format!(
+                "external_identifiers[{index}]: namespace:value does not match canonical_url normalization"
+            )));
+        }
+    }
+
+    // tool_id must match exactly one external identifier key.
+    let id_keys: Vec<String> = request
+        .external_identifiers
+        .iter()
+        .map(|id| format!("{}:{}", id.namespace, id.value))
+        .collect();
+    let tool_id_matches = id_keys.iter().filter(|k| *k == &request.tool_id).count();
+    if tool_id_matches != 1 {
+        return Err(ServiceError::InvalidRequest(
+            "tool_id must match exactly one external identifier namespace:value".to_owned(),
+        ));
+    }
+
+    // canonical_url must match one external identifier's canonical_url.
+    let url_matches = request
+        .external_identifiers
+        .iter()
+        .filter(|id| id.canonical_url.trim() == request.canonical_url.trim())
+        .count();
+    if url_matches == 0 {
+        return Err(ServiceError::InvalidRequest(
+            "canonical_url must match one external identifier's canonical_url".to_owned(),
+        ));
+    }
+
+    // Aliases must be unique ignoring case.
+    let alias_lower: Vec<String> = request
+        .aliases
+        .iter()
+        .map(|a| a.to_ascii_lowercase())
+        .collect();
+    if alias_lower.len()
+        != alias_lower
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    {
+        return Err(ServiceError::InvalidRequest(
+            "aliases must be unique ignoring case".to_owned(),
+        ));
+    }
+
+    for alias in &request.aliases {
+        validate_required("alias", alias, 200)?;
+    }
+
+    Ok(())
+}
+
+fn build_resolution(
+    status: ResolutionStatus,
+    tool_id: Option<String>,
+    normalized_identifiers: Vec<ExternalIdentifier>,
+    candidate_tool_ids: Vec<String>,
+    reason_codes: &[ReasonCode],
+) -> ResolutionResponse {
+    let mut codes: Vec<ReasonCode> = reason_codes.to_vec();
+    codes.sort_by_key(|c| {
+        // Stable sort order matching Python's sorted(set(...)) on string representation.
+        serde_json::to_string(c).unwrap_or_default()
+    });
+    codes.dedup();
+    ResolutionResponse {
+        resolution_version: "0.1.0",
+        status,
+        normalized_identifiers,
+        tool_id,
+        candidate_tool_ids,
+        reason_codes: codes,
+    }
 }

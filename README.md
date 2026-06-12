@@ -42,6 +42,11 @@ migrations on startup. The current Trust Core slice implements:
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
 - `POST /api/runs/:run_id/events`
+- `POST /api/tools` — create a tool candidate
+- `GET /api/tools` — list all tools
+- `GET /api/tools/by-id?tool_id=...` — get tool by namespaced ID
+- `POST /api/tools/resolve` — three-state identity resolution
+- `POST /api/tools/identifiers?tool_id=...` — approved source migration
 
 Run events are append-only at both the API and SQLite trigger layers. The
 backend atomically creates the initial `run_created` event and projects
@@ -61,12 +66,17 @@ uses only canonical strong identifiers, returns `resolved`,
 `create_candidate`, or `needs_review`, and never performs network requests or
 uses aliases for automatic merging.
 
+Stage 2.2 implements the Rust Tool Registry persistence and API with SQLite
+tables (`tools`, `tool_external_ids`, `tool_aliases`), CRUD endpoints,
+three-state identity resolution ported from Python to pure Rust, and
+approved source migration. External identifier uniqueness is enforced at the
+database level via a composite primary key.
+
 The minimal Foundry contract groups commitments by `toolId -> runId` and
-records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
-offchain Tool Registry persistence and API, approved alias or source-migration
-updates, Run binding, runtime Profile selector, orchestrator subprocess, SSE,
-evidence, artifacts, passports, approval records, and onchain writes are not
-implemented yet.
+records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. Run
+binding (`runs.tool_id`), runtime Profile selector, orchestrator subprocess,
+SSE, evidence, artifacts, passports, approval records, and onchain writes
+are not implemented yet.
 
 Product scope and architecture are tracked in:
 
