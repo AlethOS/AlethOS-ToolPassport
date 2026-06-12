@@ -653,6 +653,13 @@ Tool Index 按规范 Tool 聚合审计历史，允许用户查看同一工具的
 
 人工操作必须清楚区分“继续调研”“批准链下结果”“批准测试网 attestation”和“拒绝”。上链批准页面必须显示绑定的 Tool、Run、三个 Hash、chain ID 和 Registry 地址。
 
+当前 Dashboard 已实现只读 Trust Control Desk：通过同源 Next.js GET 代理读取 Rust
+`/health`、Run 列表与 Run 详情/Event，使用 TanStack Query 轮询并展示 loading、空、
+失败和 `waiting_approval` 状态。Overview、Findings、Evidence、Execution 与
+Provenance 中尚无后端权威契约的内容必须使用隔离 fixture，并在 UI 与 TypeScript
+类型中明确标记为 Preview。当前 Dashboard 不提供创建 Run、追加 Event、审批、签名
+或链上写入。
+
 ## 12. 安全与外部访问边界
 
 ```yaml
@@ -687,7 +694,7 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 | Passport 与评分 | v0.1 schema 允许七维分数，字段约束较松 | Conflict to resolve；目标 check-level 评分和 Rust 聚合尚未实现 |
 | `web3_attestation` | v0.1 Passport 必填对象 | Design conflict；回执若写回会改变已冻结 Passport，必须独立存储并在 v0.2 分离 |
 | Audit Log Hash | 文档曾按时间与 event ID 排序 | Conflict to resolve；数据库已有更可靠 sequence，目标应按 sequence 建哈希链 |
-| Dashboard | 仅开发 workspace scaffold | Planned gap；尚无 API、SSE、Graph、Board、Gap、Decision 或 approval UI |
+| Dashboard | 已实现只读双语 Trust Control Desk、Run/Event 轮询和隔离 Preview 视图 | Partial；尚无 SSE、真实 Board/Score/Hash/Passport、写操作或 approval UI |
 | Registry | 最小 commitment 合约和 Foundry tests 已实现 | Compatible；按 `toolId -> runId` 聚合，并保存三个 Hash、auditor 和 timestamp；链下 Tool Registry 仍待实现 |
 | README | 已准确标记当前未实现能力 | Compatible；实现每个迁移阶段后继续同步 |
 

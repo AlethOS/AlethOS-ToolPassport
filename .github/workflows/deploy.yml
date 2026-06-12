@@ -1,0 +1,33 @@
+name: Deploy to Aliyun ECS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aliyun-ecs-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: aliyun-ecs
+    timeout-minutes: 20
+    steps:
+      - name: Execute remote ssh commands
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            PROJECT_ROOT="/root/AlethOS-ToolPassport"
+            if [ ! -d "$PROJECT_ROOT" ]; then
+              echo "Project directory not found. Please clone the repository first."
+              exit 1
+            fi
+            cd "$PROJECT_ROOT"
+            chmod +x scripts/deploy.sh
+            ./scripts/deploy.sh

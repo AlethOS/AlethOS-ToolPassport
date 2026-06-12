@@ -30,6 +30,7 @@ node_modules/
 .next/
 out/
 coverage/
+*.tsbuildinfo
 
 # Foundry
 contracts/cache/

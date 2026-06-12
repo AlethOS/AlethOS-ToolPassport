@@ -78,6 +78,14 @@ canonical URL, name, and type as an immutable audit snapshot. A new
 `runs.tool_id` column (migration `0003`) ensures every new Run is anchored to
 a stable tool identity.
 
+The Dashboard now provides a responsive, bilingual Trust Control Desk built
+with Next.js, Tailwind CSS, TanStack Query, React Flow, and Lucide. It reads
+authoritative health, Run, and append-only Event data through read-only
+same-origin proxy routes. Audit results, Evidence Board, scores, commitments,
+execution graph, and provenance views are explicitly labeled Preview because
+their final Rust-backed contracts are not implemented yet. The Dashboard does
+not calculate scores or Hashes and exposes no approval or chain-write action.
+
 The minimal Foundry contract groups commitments by `toolId -> runId` and
 records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
 runtime Profile selector, orchestrator subprocess, SSE, evidence, artifacts,
