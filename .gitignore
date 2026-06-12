@@ -4,6 +4,7 @@
 !.env.example
 .codex/
 .agents/
+.vscode/
 
 # Local data and generated artifacts
 data/
