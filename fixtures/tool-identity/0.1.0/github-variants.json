@@ -1,0 +1,31 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "github_variants",
+  "description": "GitHub owner and repository casing, .git, and trailing slash normalize to one strong identifier.",
+  "existing_tools": [],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "LangGraph",
+    "tool_type": "agent_framework",
+    "urls": [
+      "https://GitHub.com/LangChain-AI/LangGraph.git/",
+      "https://github.com/langchain-ai/langgraph/"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "create_candidate",
+    "normalized_identifiers": [
+      {
+        "namespace": "github",
+        "value": "langchain-ai/langgraph",
+        "canonical_url": "https://github.com/langchain-ai/langgraph"
+      }
+    ],
+    "tool_id": "github:langchain-ai/langgraph",
+    "candidate_tool_ids": [],
+    "reason_codes": [
+      "new_strong_identifier"
+    ]
+  }
+}

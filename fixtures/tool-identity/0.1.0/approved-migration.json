@@ -1,0 +1,61 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "approved_migration",
+  "description": "After an approved source migration, the new identifier resolves to the original immutable tool_id.",
+  "existing_tools": [
+    {
+      "tool_schema_version": "0.1.0",
+      "tool_id": "github:old-org/tool",
+      "name": "Migrated Tool",
+      "tool_type": "mcp_server",
+      "canonical_url": "https://github.com/new-org/tool",
+      "external_identifiers": [
+        {
+          "namespace": "github",
+          "value": "old-org/tool",
+          "canonical_url": "https://github.com/old-org/tool"
+        },
+        {
+          "namespace": "github",
+          "value": "new-org/tool",
+          "canonical_url": "https://github.com/new-org/tool"
+        }
+      ],
+      "aliases": [
+        "Old Tool Name"
+      ]
+    }
+  ],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Migrated Tool",
+    "tool_type": "mcp_server",
+    "urls": [
+      "https://github.com/old-org/tool",
+      "https://github.com/new-org/tool"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "resolved",
+    "normalized_identifiers": [
+      {
+        "namespace": "github",
+        "value": "new-org/tool",
+        "canonical_url": "https://github.com/new-org/tool"
+      },
+      {
+        "namespace": "github",
+        "value": "old-org/tool",
+        "canonical_url": "https://github.com/old-org/tool"
+      }
+    ],
+    "tool_id": "github:old-org/tool",
+    "candidate_tool_ids": [
+      "github:old-org/tool"
+    ],
+    "reason_codes": [
+      "existing_identifier_match"
+    ]
+  }
+}

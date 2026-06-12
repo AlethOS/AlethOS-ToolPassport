@@ -55,11 +55,18 @@ rules by:
 scripts/check_schemas.sh
 ```
 
+Stage 2.1 adds strict versioned Tool Identity contracts, offline resolution
+fixtures, and a standard-library Python reference normalizer. The resolver
+uses only canonical strong identifiers, returns `resolved`,
+`create_candidate`, or `needs_review`, and never performs network requests or
+uses aliases for automatic merging.
+
 The minimal Foundry contract groups commitments by `toolId -> runId` and
 records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
-offchain Tool Registry, alias resolution, Run binding, runtime Profile
-selector, orchestrator subprocess, SSE, evidence, artifacts, passports,
-approval records, and onchain writes are not implemented yet.
+offchain Tool Registry persistence and API, approved alias or source-migration
+updates, Run binding, runtime Profile selector, orchestrator subprocess, SSE,
+evidence, artifacts, passports, approval records, and onchain writes are not
+implemented yet.
 
 Product scope and architecture are tracked in:
 

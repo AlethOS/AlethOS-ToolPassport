@@ -1,0 +1,70 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "conflicting_existing_identifiers",
+  "description": "Strong identifiers owned by different existing Tools require review.",
+  "existing_tools": [
+    {
+      "tool_schema_version": "0.1.0",
+      "tool_id": "github:example/tool-a",
+      "name": "Tool A",
+      "tool_type": "mcp_server",
+      "canonical_url": "https://github.com/example/tool-a",
+      "external_identifiers": [
+        {
+          "namespace": "github",
+          "value": "example/tool-a",
+          "canonical_url": "https://github.com/example/tool-a"
+        }
+      ],
+      "aliases": []
+    },
+    {
+      "tool_schema_version": "0.1.0",
+      "tool_id": "url:example.com/tool-b",
+      "name": "Tool B",
+      "tool_type": "cli_api_tool",
+      "canonical_url": "https://example.com/tool-b",
+      "external_identifiers": [
+        {
+          "namespace": "url",
+          "value": "example.com/tool-b",
+          "canonical_url": "https://example.com/tool-b"
+        }
+      ],
+      "aliases": []
+    }
+  ],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Conflicting Tool",
+    "tool_type": "generic",
+    "urls": [
+      "https://github.com/example/tool-a",
+      "https://example.com/tool-b"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "needs_review",
+    "normalized_identifiers": [
+      {
+        "namespace": "github",
+        "value": "example/tool-a",
+        "canonical_url": "https://github.com/example/tool-a"
+      },
+      {
+        "namespace": "url",
+        "value": "example.com/tool-b",
+        "canonical_url": "https://example.com/tool-b"
+      }
+    ],
+    "tool_id": null,
+    "candidate_tool_ids": [
+      "github:example/tool-a",
+      "url:example.com/tool-b"
+    ],
+    "reason_codes": [
+      "conflicting_existing_identifiers"
+    ]
+  }
+}

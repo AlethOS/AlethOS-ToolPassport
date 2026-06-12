@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/tool-identity-intake.schema.json",
+  "title": "Tool Identity Intake",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "intake_version",
+    "name",
+    "tool_type",
+    "urls"
+  ],
+  "properties": {
+    "intake_version": {
+      "const": "0.1.0"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_type": {
+      "enum": [
+        "generic",
+        "agent_framework",
+        "mcp_server",
+        "cli_api_tool"
+      ]
+    },
+    "urls": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "alias_only",
+  "description": "An alias match is only a human discovery candidate and never an automatic merge.",
+  "existing_tools": [
+    {
+      "tool_schema_version": "0.1.0",
+      "tool_id": "url:example.com/product",
+      "name": "Example Product",
+      "tool_type": "cli_api_tool",
+      "canonical_url": "https://example.com/product",
+      "external_identifiers": [
+        {
+          "namespace": "url",
+          "value": "example.com/product",
+          "canonical_url": "https://example.com/product"
+        }
+      ],
+      "aliases": [
+        "Old Product Name"
+      ]
+    }
+  ],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Old Product Name",
+    "tool_type": "cli_api_tool",
+    "urls": []
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "needs_review",
+    "normalized_identifiers": [],
+    "tool_id": null,
+    "candidate_tool_ids": [
+      "url:example.com/product"
+    ],
+    "reason_codes": [
+      "name_match_only"
+    ]
+  }
+}

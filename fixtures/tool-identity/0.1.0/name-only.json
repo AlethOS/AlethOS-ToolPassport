@@ -1,0 +1,22 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "name_only",
+  "description": "A name without a strong identifier always requires review.",
+  "existing_tools": [],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Unknown Tool",
+    "tool_type": "generic",
+    "urls": []
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "needs_review",
+    "normalized_identifiers": [],
+    "tool_id": null,
+    "candidate_tool_ids": [],
+    "reason_codes": [
+      "name_only"
+    ]
+  }
+}

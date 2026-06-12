@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mapfile -d '' json_files < <(
-  find "$ROOT/schemas" "$ROOT/standards" "$ROOT/profiles" -type f -name '*.json' -print0 | sort -z
+  find "$ROOT/schemas" "$ROOT/standards" "$ROOT/profiles" "$ROOT/fixtures" \
+    -type f -name '*.json' -print0 | sort -z
 )
 
 if (( ${#json_files[@]} == 0 )); then
@@ -27,4 +28,5 @@ for json_file in "${json_files[@]}"; do
 done
 
 python3 "$ROOT/scripts/validate_audit_catalog.py"
+python3 "$ROOT/scripts/validate_tool_identity.py"
 python3 -m unittest discover -s "$ROOT/schemas/tests" -p 'test_*.py'

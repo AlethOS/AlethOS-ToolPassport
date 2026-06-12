@@ -1,0 +1,26 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "ambiguous_urls",
+  "description": "HTTP, query, and fragment inputs require review instead of automatic normalization.",
+  "existing_tools": [],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Ambiguous Tool",
+    "tool_type": "generic",
+    "urls": [
+      "http://example.com/tool",
+      "https://example.com/tool?source=index",
+      "https://example.com/tool#overview"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "needs_review",
+    "normalized_identifiers": [],
+    "tool_id": null,
+    "candidate_tool_ids": [],
+    "reason_codes": [
+      "invalid_or_ambiguous_url"
+    ]
+  }
+}
