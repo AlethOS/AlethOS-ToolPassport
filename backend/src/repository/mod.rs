@@ -17,6 +17,8 @@ pub enum RepositoryError {
     Database(#[from] sqlx::Error),
     #[error("stored data is invalid: {0}")]
     InvalidStoredData(String),
+    #[error("run state changed")]
+    RunStateChanged,
     #[error("database migration failed")]
     Migration(#[from] sqlx::migrate::MigrateError),
 }
@@ -31,9 +33,16 @@ impl Repository {
         Self { pool }
     }
 
-    pub async fn create_run(&self, run: &Run) -> Result<Run, RepositoryError> {
+    pub async fn create_run(
+        &self,
+        run: &Run,
+        created_event: &RunEvent,
+    ) -> Result<Run, RepositoryError> {
         let tool_urls = serde_json::to_string(&run.tool.urls)
             .map_err(|error| RepositoryError::InvalidStoredData(error.to_string()))?;
+        let event_payload = serde_json::to_string(&created_event.payload)
+            .map_err(|error| RepositoryError::InvalidStoredData(error.to_string()))?;
+        let mut transaction = self.pool.begin().await?;
 
         sqlx::query(
             r#"
@@ -53,9 +62,27 @@ impl Repository {
         .bind(&run.current_node)
         .bind(format_timestamp(run.created_at))
         .bind(format_timestamp(run.updated_at))
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
 
+        sqlx::query(
+            r#"
+            INSERT INTO run_events (
+                event_id, run_id, sequence, node_id, event_type, payload, created_at
+            )
+            VALUES (?, ?, 1, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(created_event.event_id.to_string())
+        .bind(created_event.run_id.to_string())
+        .bind(&created_event.node_id)
+        .bind(created_event.event_type.as_str())
+        .bind(event_payload)
+        .bind(format_timestamp(created_event.created_at))
+        .execute(&mut *transaction)
+        .await?;
+
+        transaction.commit().await?;
         Ok(run.clone())
     }
 
@@ -90,9 +117,38 @@ impl Repository {
         row.map(TryInto::try_into).transpose()
     }
 
-    pub async fn append_event(&self, event: &RunEvent) -> Result<RunEvent, RepositoryError> {
+    pub async fn append_event(
+        &self,
+        event: &RunEvent,
+        expected_status: RunStatus,
+        next_status: Option<RunStatus>,
+        current_node: Option<&str>,
+    ) -> Result<RunEvent, RepositoryError> {
         let payload = serde_json::to_string(&event.payload)
             .map_err(|error| RepositoryError::InvalidStoredData(error.to_string()))?;
+        let mut transaction = self.pool.begin().await?;
+        let next_status = next_status.map(RunStatus::as_str);
+
+        let update = sqlx::query(
+            r#"
+            UPDATE runs
+            SET status = COALESCE(?, status),
+                current_node = COALESCE(?, current_node),
+                updated_at = ?
+            WHERE run_id = ? AND status = ?
+            "#,
+        )
+        .bind(next_status)
+        .bind(current_node)
+        .bind(format_timestamp(event.created_at))
+        .bind(event.run_id.to_string())
+        .bind(expected_status.as_str())
+        .execute(&mut *transaction)
+        .await?;
+
+        if update.rows_affected() != 1 {
+            return Err(RepositoryError::RunStateChanged);
+        }
 
         let row = sqlx::query_as::<_, RunEventRow>(
             r#"
@@ -112,9 +168,10 @@ impl Repository {
         .bind(payload)
         .bind(format_timestamp(event.created_at))
         .bind(event.run_id.to_string())
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *transaction)
         .await?;
 
+        transaction.commit().await?;
         row.try_into()
     }
 

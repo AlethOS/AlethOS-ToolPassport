@@ -20,7 +20,7 @@ pub struct CreateRunRequest {
     pub tool: ToolInput,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     Pending,

@@ -72,6 +72,12 @@ impl From<ServiceError> for ApiError {
                 error.to_string(),
                 json!({}),
             ),
+            ServiceError::Conflict(message) => Self::new(
+                StatusCode::CONFLICT,
+                "run_state_conflict",
+                message,
+                json!({}),
+            ),
             ServiceError::Repository(_) => Self::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",

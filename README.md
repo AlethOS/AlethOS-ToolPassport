@@ -1,8 +1,14 @@
 # AlethOS ToolPassport
 
-AlethOS ToolPassport is a verifiable AI tool audit module. The repository is an
-MVP monorepo with a Rust trust core, a LangGraph orchestrator, a Next.js
-dashboard, and a minimal Foundry registry.
+AlethOS ToolPassport is a long-horizon, standard-driven audit and attestation
+module for AI tools. It is designed to investigate a target through bounded
+research rounds, bind findings to evidence, preserve audit provenance, and
+produce hash-stable records without claiming absolute truth.
+
+The repository is an MVP monorepo with a Rust trust core, a LangGraph
+orchestrator, a Next.js dashboard, and a minimal Foundry registry. The target
+workflow and its migration from the current scaffold are documented in
+`docs/project-overview.md` and `docs/technical-design.md`.
 
 ## Start Here
 
@@ -38,8 +44,10 @@ migrations on startup. The current Trust Core slice implements:
 - `POST /api/runs/:run_id/events`
 
 Run events are append-only at both the API and SQLite trigger layers. The
-orchestrator subprocess, SSE, evidence, artifacts, passports, approvals, and
-onchain writes are not implemented yet.
+backend atomically creates the initial `run_created` event and projects
+validated node, approval, and terminal-status events into the Run summary.
+The orchestrator subprocess, SSE, evidence, artifacts, passports, approval
+records, and onchain writes are not implemented yet.
 
 Product scope and architecture are tracked in:
 

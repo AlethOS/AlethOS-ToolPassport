@@ -94,7 +94,9 @@ async fn creates_and_queries_runs() {
     .await;
     assert_eq!(details.0, StatusCode::OK);
     assert_eq!(details.1["run"]["run_id"], run_id);
-    assert_eq!(details.1["events"], json!([]));
+    assert_eq!(details.1["events"][0]["event_type"], "run_created");
+    assert_eq!(details.1["events"][0]["node_id"], "run");
+    assert_eq!(details.1["events"][0]["payload"]["status"], "pending");
 }
 
 #[tokio::test]
@@ -120,8 +122,11 @@ async fn appends_events_in_order_and_rejects_mutation() {
     let events = details.1["events"]
         .as_array()
         .expect("events must be an array");
-    assert_eq!(events[0]["event_type"], "node_started");
-    assert_eq!(events[1]["event_type"], "node_finished");
+    assert_eq!(events[0]["event_type"], "run_created");
+    assert_eq!(events[1]["event_type"], "node_started");
+    assert_eq!(events[2]["event_type"], "node_finished");
+    assert_eq!(details.1["run"]["status"], "running");
+    assert_eq!(details.1["run"]["current_node"], "plan_audit");
 
     let event_id = first.1["event_id"]
         .as_str()
@@ -139,6 +144,90 @@ async fn appends_events_in_order_and_rejects_mutation() {
         .await
         .expect_err("event delete must be rejected");
     assert!(delete_error.to_string().contains("append-only"));
+}
+
+#[tokio::test]
+async fn projects_approval_and_terminal_status_events() {
+    let (router, _) = test_app().await;
+    let run_id = create_run(&router).await;
+
+    let started = append_event(&router, &run_id, "plan_audit", "node_started").await;
+    assert_eq!(started.0, StatusCode::CREATED);
+
+    let approval_required =
+        append_event(&router, &run_id, "human_review_gate", "approval_required").await;
+    assert_eq!(approval_required.0, StatusCode::CREATED);
+    let details = get_run(&router, &run_id).await;
+    assert_eq!(details.1["run"]["status"], "waiting_approval");
+    assert_eq!(details.1["run"]["current_node"], "human_review_gate");
+
+    let blocked_node = append_event(&router, &run_id, "next_node", "node_started").await;
+    assert_error(&blocked_node, StatusCode::BAD_REQUEST, "invalid_request");
+
+    let approval_resolved =
+        append_event(&router, &run_id, "human_review_gate", "approval_resolved").await;
+    assert_eq!(approval_resolved.0, StatusCode::CREATED);
+
+    let finished = append_event_with_payload(
+        &router,
+        &run_id,
+        "finish",
+        "run_status_changed",
+        json!({"status": "success"}),
+    )
+    .await;
+    assert_eq!(finished.0, StatusCode::CREATED);
+
+    let details = get_run(&router, &run_id).await;
+    assert_eq!(details.1["run"]["status"], "success");
+    assert_eq!(details.1["run"]["current_node"], "finish");
+}
+
+#[tokio::test]
+async fn rejects_trust_core_owned_and_invalid_status_events() {
+    let (router, _) = test_app().await;
+    let run_id = create_run(&router).await;
+
+    let duplicate_created = append_event(&router, &run_id, "run", "run_created").await;
+    assert_error(
+        &duplicate_created,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
+
+    let invalid_status = append_event_with_payload(
+        &router,
+        &run_id,
+        "finish",
+        "run_status_changed",
+        json!({"status": "cancelled"}),
+    )
+    .await;
+    assert_error(&invalid_status, StatusCode::BAD_REQUEST, "invalid_request");
+
+    let success_from_pending = append_event_with_payload(
+        &router,
+        &run_id,
+        "finish",
+        "run_status_changed",
+        json!({"status": "success"}),
+    )
+    .await;
+    assert_error(
+        &success_from_pending,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
+
+    let details = get_run(&router, &run_id).await;
+    assert_eq!(details.1["run"]["status"], "pending");
+    assert_eq!(
+        details.1["events"]
+            .as_array()
+            .expect("events must be an array")
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -230,6 +319,16 @@ async fn append_event(
     node_id: &str,
     event_type: &str,
 ) -> (StatusCode, Value) {
+    append_event_with_payload(router, run_id, node_id, event_type, json!({})).await
+}
+
+async fn append_event_with_payload(
+    router: &Router,
+    run_id: &str,
+    node_id: &str,
+    event_type: &str,
+    payload: Value,
+) -> (StatusCode, Value) {
     send_json(
         router,
         Method::POST,
@@ -237,8 +336,18 @@ async fn append_event(
         json!({
             "node_id": node_id,
             "event_type": event_type,
-            "payload": {}
+            "payload": payload
         }),
+    )
+    .await
+}
+
+async fn get_run(router: &Router, run_id: &str) -> (StatusCode, Value) {
+    send(
+        router,
+        Method::GET,
+        &format!("/api/runs/{run_id}"),
+        Body::empty(),
     )
     .await
 }
