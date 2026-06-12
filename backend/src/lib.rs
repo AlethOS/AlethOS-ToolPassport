@@ -1,19 +1,7 @@
-use axum::{Json, Router, routing::get};
-use serde::Serialize;
+pub mod api;
+pub mod domain;
+pub mod repository;
+pub mod services;
 
-#[derive(Debug, Serialize)]
-struct HealthResponse {
-    status: &'static str,
-    service: &'static str,
-}
-
-pub fn app() -> Router {
-    Router::new().route("/health", get(health))
-}
-
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok",
-        service: "toolpassport-backend",
-    })
-}
+pub use api::app;
+pub use repository::{connect_and_migrate, migrate};

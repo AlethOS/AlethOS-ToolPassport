@@ -28,6 +28,19 @@ cd dashboard && npm run dev -- --hostname 127.0.0.1
 cd orchestrator && PYTHONPATH=src .venv/bin/python scripts/run_graph_demo.py
 ```
 
+The backend defaults to `sqlite://../data/toolpassport.db` when started from
+`backend/`; set `DATABASE_URL` to override it. SQLx runs embedded SQLite
+migrations on startup. The current Trust Core slice implements:
+
+- `POST /api/runs`
+- `GET /api/runs`
+- `GET /api/runs/:run_id`
+- `POST /api/runs/:run_id/events`
+
+Run events are append-only at both the API and SQLite trigger layers. The
+orchestrator subprocess, SSE, evidence, artifacts, passports, approvals, and
+onchain writes are not implemented yet.
+
 Product scope and architecture are tracked in:
 
 - `docs/project-overview.md`

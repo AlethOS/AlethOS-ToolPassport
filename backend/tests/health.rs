@@ -4,12 +4,20 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
-use toolpassport_backend::app;
+use sqlx::sqlite::SqlitePoolOptions;
+use toolpassport_backend::{app, migrate};
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn health_returns_json_status() {
-    let response = app()
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("test database must connect");
+    migrate(&pool).await.expect("migrations must run");
+
+    let response = app(pool)
         .oneshot(
             Request::builder()
                 .uri("/health")
