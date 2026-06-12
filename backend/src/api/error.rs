@@ -1,0 +1,107 @@
+use axum::{
+    Json,
+    extract::rejection::JsonRejection,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use serde::Serialize;
+use serde_json::{Value, json};
+
+use crate::services::ServiceError;
+
+pub type ApiResult<T> = Result<T, ApiError>;
+
+#[derive(Debug, Serialize)]
+struct ErrorResponse {
+    code: &'static str,
+    message: String,
+    details: Value,
+}
+
+#[derive(Debug)]
+pub struct ApiError {
+    status: StatusCode,
+    response: ErrorResponse,
+}
+
+impl ApiError {
+    pub fn invalid_json(rejection: JsonRejection) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "request body must be valid JSON matching the expected shape",
+            json!({ "reason": rejection.body_text() }),
+        )
+    }
+
+    fn new(
+        status: StatusCode,
+        code: &'static str,
+        message: impl Into<String>,
+        details: Value,
+    ) -> Self {
+        Self {
+            status,
+            response: ErrorResponse {
+                code,
+                message: message.into(),
+                details,
+            },
+        }
+    }
+}
+
+impl From<ServiceError> for ApiError {
+    fn from(error: ServiceError) -> Self {
+        match error {
+            ServiceError::InvalidRunId => Self::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_run_id",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::InvalidRequest(message) => Self::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                message,
+                json!({}),
+            ),
+            ServiceError::RunNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "run_not_found",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::Repository(_) => Self::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "an internal error occurred",
+                json!({}),
+            ),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.status, Json(self.response)).into_response()
+    }
+}
+
+pub async fn not_found() -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "route_not_found",
+        "route not found",
+        json!({}),
+    )
+}
+
+pub async fn method_not_allowed() -> ApiError {
+    ApiError::new(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "method_not_allowed",
+        "method not allowed",
+        json!({}),
+    )
+}
