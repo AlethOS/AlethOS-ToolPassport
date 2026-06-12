@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/audit-standard.schema.json",
+  "title": "Audit Standard",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "standard_id",
+    "standard_version",
+    "title",
+    "description",
+    "dimensions",
+    "evidence_types",
+    "scoring_rules"
+  ],
+  "properties": {
+    "standard_id": {
+      "$ref": "#/$defs/stable_id"
+    },
+    "standard_version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "title": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "description": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "dimensions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/dimension"
+      }
+    },
+    "evidence_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/evidence_type"
+      }
+    },
+    "scoring_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/scoring_rule"
+      }
+    }
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "semantic_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension_id",
+        "title",
+        "description"
+      ],
+      "properties": {
+        "dimension_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "title": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "description": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      }
+    },
+    "evidence_type": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_type_id",
+        "title",
+        "description"
+      ],
+      "properties": {
+        "evidence_type_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "title": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "description": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      }
+    },
+    "finding_points": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass",
+        "partial",
+        "fail",
+        "unknown"
+      ],
+      "properties": {
+        "pass": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "partial": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fail": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "unknown": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "scoring_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scoring_rule_id",
+        "description",
+        "finding_points",
+        "not_applicable_requires_approval"
+      ],
+      "properties": {
+        "scoring_rule_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "description": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "finding_points": {
+          "$ref": "#/$defs/finding_points"
+        },
+        "not_applicable_requires_approval": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

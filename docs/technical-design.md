@@ -111,27 +111,30 @@ sequenceDiagram
 
 `Audit Standard` 是版本化、只读的审计范式，定义维度、通用 controls、证据质量规则、评分聚合、风险门槛和停止条件。Agent 只能引用标准，不能在运行中修改标准或创建未版本化评分规则。
 
-目标标准标识示例：
+当前已实现 `schemas/audit-standard.schema.json` 和
+`standards/alethos-toolpassport/0.2.0.json`。该 fixture 固定七个维度、允许的证据类型
+和 finding 到规则分值的映射；停止条件、风险门槛与 Rust 聚合仍属于后续实现。
 
 ```json
 {
   "standard_id": "alethos-toolpassport",
   "standard_version": "0.2.0",
   "dimensions": [
-    "capability_clarity",
-    "interface_openness",
-    "automation_readiness",
-    "data_portability",
-    "permission_risk",
-    "evidence_quality",
-    "ecosystem_fit"
+    {
+      "dimension_id": "capability_clarity",
+      "title": "Capability Clarity",
+      "description": "Capabilities, limits, and intended uses are explicit and evidence-bound."
+    }
   ]
 }
 ```
 
 ### 4.2 Tool Type Profile
 
-Profile 将通用标准具体化为某类工具的检查路线。每个 Profile 必须声明版本、适用条件、检查项、权重、所需来源和高风险检查。MVP 目标 Profile 为 `mcp_server`、`agent_framework` 和 `cli_api_tool`；无法可靠识别时只能使用明确受限的 `generic` Profile。
+Profile 将通用标准具体化为某类工具的检查路线。每个 Profile 必须声明版本、适用条件、检查项、权重、所需来源和高风险检查。当前已实现严格的
+`schemas/audit-profile.schema.json`、`generic` fallback fixture 和
+`agent_framework` fixture；`mcp_server` 与 `cli_api_tool` 仍是 Stage 1 待实现项。
+无法可靠识别时只能使用明确受限的 `generic` Profile。
 
 Profile 选择规则：
 
@@ -141,14 +144,17 @@ Profile 选择规则：
 4. Profile 一旦进入调查回路便绑定到运行版本；切换 Profile 必须记录原因并重建计划；
 5. Agent 不得因为“更容易得高分”而更换 Profile。
 
+当前离线 catalog 校验要求恰好一个 `generic` fallback，fallback 阈值必须为零，且
+同一 catalog 中每个候选工具类型只能由一个 Profile 声明。实际
+`tool_fingerprint -> profile_selector` 运行逻辑仍属于 Stage 2。
+
 ### 4.3 Check 与确定性评分
 
 Check 是最小审计单元。Agent 负责提交证据化 finding；Rust 根据版本化规则计算得分。目标 Check 定义至少包含：
 
 ```json
 {
-  "check_id": "automation.structured_io",
-  "profile_id": "agent_framework",
+  "check_id": "agent_framework.structured_io",
   "dimension": "automation_readiness",
   "question": "Does the tool expose stable structured input and output?",
   "weight": 1.2,
@@ -567,6 +573,7 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 | Append-only Event | SQLite sequence、更新/删除 trigger 已实现 | Partial；尚无公开 sequence、决策事件、`prev_event_hash` 或 `event_hash` |
 | Orchestrator | TypedDict mock，仅 `clarify_goal -> plan_audit` | Major planned gap；尚无 Pydantic、事件发射、调查回路、恢复、预算或人工等待 |
 | Evidence / Artifact | 只有 v0.1 schema，无 API 和表 | Planned gap；Evidence Hash、snapshot、Board 和 Gap Tracker 需要 schema/API migration |
+| Audit Standard / Profile | 已实现 v0.2 core schema、Standard、`generic` 与 `agent_framework` fixtures 和离线 catalog 校验 | Partial；`mcp_server`、`cli_api_tool` 和 Stage 2 selector 尚未实现 |
 | Passport 与评分 | v0.1 schema 允许七维分数，字段约束较松 | Conflict to resolve；目标 check-level 评分和 Rust 聚合尚未实现 |
 | `web3_attestation` | v0.1 Passport 必填对象 | Design conflict；回执若写回会改变已冻结 Passport，必须独立存储并在 v0.2 分离 |
 | Audit Log Hash | 文档曾按时间与 event ID 排序 | Conflict to resolve；数据库已有更可靠 sequence，目标应按 sequence 建哈希链 |
@@ -578,7 +585,9 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 
 迁移必须保持 mock 路径可运行，并避免一次跨所有模块修改未完成契约。
 
-1. **Standard and Profile artifacts**：新增版本化标准、三个 MVP Profile 和 check fixtures；暂不改变 Passport v0.1。
+1. **Standard and Profile artifacts**：已完成 core schema、版本化标准、`generic` 与
+   `agent_framework` fixtures 和离线校验；仍需补齐 `mcp_server` 与
+   `cli_api_tool`，且暂不改变 Passport v0.1。
 2. **Orchestrator investigation mock**：用 fixture 实现类型化调查回路、Board、Gap、停止条件和 Skeptic Review；Artifact 先通过受控本地 mock，随后接后端。
 3. **Evidence and Artifact trust core**：扩展 schema、migration 和 API，由 Rust 分配 ID、保存内容并计算 Hash。
 4. **Decision events and hash chain**：发布 run-event v0.2，加入 sequence、决策事件和事件哈希链；迁移所有消费者。

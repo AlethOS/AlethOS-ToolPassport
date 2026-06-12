@@ -46,8 +46,17 @@ migrations on startup. The current Trust Core slice implements:
 Run events are append-only at both the API and SQLite trigger layers. The
 backend atomically creates the initial `run_created` event and projects
 validated node, approval, and terminal-status events into the Run summary.
-The orchestrator subprocess, SSE, evidence, artifacts, passports, approval
-records, and onchain writes are not implemented yet.
+The repository also includes a versioned core Audit Standard plus `generic`
+and `agent_framework` Profile fixtures. They are validated offline against
+strict JSON Schemas and catalog cross-reference rules by:
+
+```bash
+scripts/check_schemas.sh
+```
+
+The `mcp_server` and `cli_api_tool` Profiles, runtime Profile selector,
+orchestrator subprocess, SSE, evidence, artifacts, passports, approval records,
+and onchain writes are not implemented yet.
 
 Product scope and architecture are tracked in:
 

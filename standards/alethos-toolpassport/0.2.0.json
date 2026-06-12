@@ -1,0 +1,99 @@
+{
+  "standard_id": "alethos-toolpassport",
+  "standard_version": "0.2.0",
+  "title": "AlethOS ToolPassport Audit Standard",
+  "description": "Core dimensions, evidence types, and deterministic finding points for ToolPassport audits.",
+  "dimensions": [
+    {
+      "dimension_id": "capability_clarity",
+      "title": "Capability Clarity",
+      "description": "Capabilities, limits, and intended uses are explicit and evidence-bound."
+    },
+    {
+      "dimension_id": "interface_openness",
+      "title": "Interface Openness",
+      "description": "Interfaces and integration contracts are documented and inspectable."
+    },
+    {
+      "dimension_id": "automation_readiness",
+      "title": "Automation Readiness",
+      "description": "The tool supports stable automated operation, errors, logs, and recovery."
+    },
+    {
+      "dimension_id": "data_portability",
+      "title": "Data Portability",
+      "description": "Data, configuration, and workflows can be exported or migrated."
+    },
+    {
+      "dimension_id": "permission_risk",
+      "title": "Permission Risk",
+      "description": "Sensitive permissions and side effects are explicit, bounded, and controllable."
+    },
+    {
+      "dimension_id": "evidence_quality",
+      "title": "Evidence Quality",
+      "description": "Important claims are supported by reliable, locatable, and reviewable evidence."
+    },
+    {
+      "dimension_id": "ecosystem_fit",
+      "title": "Ecosystem Fit",
+      "description": "The tool is composable, replaceable, maintainable, and suitable for long-running workflows."
+    }
+  ],
+  "evidence_types": [
+    {
+      "evidence_type_id": "user_material",
+      "title": "User Material",
+      "description": "Material explicitly supplied and authorized by the user."
+    },
+    {
+      "evidence_type_id": "official_website",
+      "title": "Official Website",
+      "description": "Public content published on the tool owner's official website."
+    },
+    {
+      "evidence_type_id": "official_docs",
+      "title": "Official Documentation",
+      "description": "Versioned or current documentation published by the tool owner."
+    },
+    {
+      "evidence_type_id": "github_readme",
+      "title": "GitHub README",
+      "description": "README content from an identified public source repository revision."
+    },
+    {
+      "evidence_type_id": "github_metadata",
+      "title": "GitHub Metadata",
+      "description": "Repository metadata tied to an identified public repository."
+    },
+    {
+      "evidence_type_id": "public_example",
+      "title": "Public Example",
+      "description": "A locatable public example that demonstrates a claimed behavior."
+    }
+  ],
+  "scoring_rules": [
+    {
+      "scoring_rule_id": "positive_capability_v1",
+      "description": "Awards points when evidence supports a positive capability or quality.",
+      "finding_points": {
+        "pass": 1,
+        "partial": 0.5,
+        "fail": 0,
+        "unknown": 0
+      },
+      "not_applicable_requires_approval": true
+    },
+    {
+      "scoring_rule_id": "bounded_risk_v1",
+      "description": "Awards points when a risk is explicitly bounded and controlled.",
+      "finding_points": {
+        "pass": 1,
+        "partial": 0.25,
+        "fail": 0,
+        "unknown": 0
+      },
+      "not_applicable_requires_approval": true
+    }
+  ]
+}

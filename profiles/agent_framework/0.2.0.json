@@ -1,0 +1,125 @@
+{
+  "profile_id": "agent_framework",
+  "profile_version": "0.2.0",
+  "standard_id": "alethos-toolpassport",
+  "standard_version": "0.2.0",
+  "title": "Agent Framework Profile",
+  "description": "Checks for frameworks that orchestrate agents, tools, state, and human gates.",
+  "selection": {
+    "tool_type_candidates": [
+      "agent_framework"
+    ],
+    "minimum_confidence": 0.75,
+    "fallback": false
+  },
+  "scope_limitations": [],
+  "checks": [
+    {
+      "check_id": "agent_framework.capability_boundaries",
+      "dimension": "capability_clarity",
+      "question": "Are supported agent patterns and known limitations documented?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "agent_framework.tool_contract",
+      "dimension": "interface_openness",
+      "question": "Is the tool invocation contract documented with inspectable schemas or examples?",
+      "weight": 1.25,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "agent_framework.structured_io",
+      "dimension": "automation_readiness",
+      "question": "Does the framework expose stable structured input and output?",
+      "weight": 1.25,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "agent_framework.state_recovery",
+      "dimension": "automation_readiness",
+      "question": "Are persistence, checkpointing, and recovery behavior documented?",
+      "weight": 1.5,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "agent_framework.state_export",
+      "dimension": "data_portability",
+      "question": "Can graph state, checkpoints, or workflow definitions be exported?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "agent_framework.tool_permission_isolation",
+      "dimension": "permission_risk",
+      "question": "Can tool permissions and side effects be constrained per agent or workflow?",
+      "weight": 2,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": true,
+      "scoring_rule_id": "bounded_risk_v1"
+    },
+    {
+      "check_id": "agent_framework.human_gate",
+      "dimension": "permission_risk",
+      "question": "Can sensitive tool actions wait for explicit human approval?",
+      "weight": 2,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": true,
+      "scoring_rule_id": "bounded_risk_v1"
+    },
+    {
+      "check_id": "agent_framework.claim_traceability",
+      "dimension": "evidence_quality",
+      "question": "Are major framework and safety claims supported by reviewable evidence?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "agent_framework.composability",
+      "dimension": "ecosystem_fit",
+      "question": "Are extension, replacement, and integration paths documented?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    }
+  ]
+}
