@@ -1,9 +1,9 @@
 # AlethOS ToolPassport
 
-AlethOS ToolPassport is a long-horizon, standard-driven audit and attestation
-module for AI tools. It is designed to investigate a target through bounded
-research rounds, bind findings to evidence, preserve audit provenance, and
-produce hash-stable records without claiming absolute truth.
+AlethOS ToolPassport is a structured audit index for AI tools. It groups
+long-horizon, standard-driven audit runs around stable tool identities, binds
+findings to evidence, preserves audit provenance, and produces hash-stable
+records without claiming absolute truth.
 
 The repository is an MVP monorepo with a Rust trust core, a LangGraph
 orchestrator, a Next.js dashboard, and a minimal Foundry registry. The target
@@ -54,9 +54,12 @@ strict JSON Schemas and catalog cross-reference rules by:
 scripts/check_schemas.sh
 ```
 
-The `mcp_server` and `cli_api_tool` Profiles, runtime Profile selector,
-orchestrator subprocess, SSE, evidence, artifacts, passports, approval records,
-and onchain writes are not implemented yet.
+The minimal Foundry contract groups commitments by `toolId -> runId` and
+records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
+offchain Tool Registry, alias resolution, Run binding, `mcp_server` and
+`cli_api_tool` Profiles, runtime Profile selector, orchestrator subprocess,
+SSE, evidence, artifacts, passports, approval records, and onchain writes are
+not implemented yet.
 
 Product scope and architecture are tracked in:
 
