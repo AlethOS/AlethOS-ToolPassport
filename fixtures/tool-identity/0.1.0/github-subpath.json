@@ -1,0 +1,24 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "github_subpath",
+  "description": "GitHub issue, tree, blob, and other repository subpaths require review.",
+  "existing_tools": [],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Repository Tree",
+    "tool_type": "agent_framework",
+    "urls": [
+      "https://github.com/example/tool/tree/main"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "needs_review",
+    "normalized_identifiers": [],
+    "tool_id": null,
+    "candidate_tool_ids": [],
+    "reason_codes": [
+      "invalid_or_ambiguous_url"
+    ]
+  }
+}

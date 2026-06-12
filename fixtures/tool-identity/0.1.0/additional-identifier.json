@@ -1,0 +1,54 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "additional_identifier",
+  "description": "An existing identifier plus a new identifier requires review before treating it as a source migration.",
+  "existing_tools": [
+    {
+      "tool_schema_version": "0.1.0",
+      "tool_id": "github:old-org/tool",
+      "name": "Migrating Tool",
+      "tool_type": "mcp_server",
+      "canonical_url": "https://github.com/old-org/tool",
+      "external_identifiers": [
+        {
+          "namespace": "github",
+          "value": "old-org/tool",
+          "canonical_url": "https://github.com/old-org/tool"
+        }
+      ],
+      "aliases": []
+    }
+  ],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Migrating Tool",
+    "tool_type": "mcp_server",
+    "urls": [
+      "https://github.com/old-org/tool",
+      "https://github.com/new-org/tool"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "needs_review",
+    "normalized_identifiers": [
+      {
+        "namespace": "github",
+        "value": "new-org/tool",
+        "canonical_url": "https://github.com/new-org/tool"
+      },
+      {
+        "namespace": "github",
+        "value": "old-org/tool",
+        "canonical_url": "https://github.com/old-org/tool"
+      }
+    ],
+    "tool_id": null,
+    "candidate_tool_ids": [
+      "github:old-org/tool"
+    ],
+    "reason_codes": [
+      "additional_identifier_requires_review"
+    ]
+  }
+}

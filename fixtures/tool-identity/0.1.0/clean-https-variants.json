@@ -1,0 +1,31 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "clean_https_variants",
+  "description": "A clean general HTTPS URL lowers the host, removes default port and trailing slash, and preserves path casing.",
+  "existing_tools": [],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Example Tool",
+    "tool_type": "cli_api_tool",
+    "urls": [
+      "https://Example.com:443/Tool/",
+      "https://example.com/Tool"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "create_candidate",
+    "normalized_identifiers": [
+      {
+        "namespace": "url",
+        "value": "example.com/Tool",
+        "canonical_url": "https://example.com/Tool"
+      }
+    ],
+    "tool_id": "url:example.com/Tool",
+    "candidate_tool_ids": [],
+    "reason_codes": [
+      "new_strong_identifier"
+    ]
+  }
+}

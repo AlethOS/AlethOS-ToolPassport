@@ -1,8 +1,14 @@
 # AlethOS ToolPassport
 
-AlethOS ToolPassport is a verifiable AI tool audit module. The repository is an
-MVP monorepo with a Rust trust core, a LangGraph orchestrator, a Next.js
-dashboard, and a minimal Foundry registry.
+AlethOS ToolPassport is a structured audit index for AI tools. It groups
+long-horizon, standard-driven audit runs around stable tool identities, binds
+findings to evidence, preserves audit provenance, and produces hash-stable
+records without claiming absolute truth.
+
+The repository is an MVP monorepo with a Rust trust core, a LangGraph
+orchestrator, a Next.js dashboard, and a minimal Foundry registry. The target
+workflow and its migration from the current scaffold are documented in
+`docs/project-overview.md` and `docs/technical-design.md`.
 
 ## Start Here
 
@@ -32,14 +38,50 @@ The backend defaults to `sqlite://../data/toolpassport.db` when started from
 `backend/`; set `DATABASE_URL` to override it. SQLx runs embedded SQLite
 migrations on startup. The current Trust Core slice implements:
 
-- `POST /api/runs`
+- `POST /api/runs` — create an audit run bound to an existing Tool (accepts `tool_id`)
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
 - `POST /api/runs/:run_id/events`
+- `POST /api/tools` — create a tool candidate
+- `GET /api/tools` — list all tools
+- `GET /api/tools/by-id?tool_id=...` — get tool by namespaced ID
+- `POST /api/tools/resolve` — three-state identity resolution
+- `POST /api/tools/identifiers?tool_id=...` — approved source migration
 
 Run events are append-only at both the API and SQLite trigger layers. The
-orchestrator subprocess, SSE, evidence, artifacts, passports, approvals, and
-onchain writes are not implemented yet.
+backend atomically creates the initial `run_created` event and projects
+validated node, approval, and terminal-status events into the Run summary.
+The repository also includes a versioned core Audit Standard plus `generic`,
+`agent_framework`, `mcp_server`, and `cli_api_tool` Profile fixtures. They are
+validated offline against strict JSON Schemas and catalog cross-reference
+rules by:
+
+```bash
+scripts/check_schemas.sh
+```
+
+Stage 2.1 adds strict versioned Tool Identity contracts, offline resolution
+fixtures, and a standard-library Python reference normalizer. The resolver
+uses only canonical strong identifiers, returns `resolved`,
+`create_candidate`, or `needs_review`, and never performs network requests or
+uses aliases for automatic merging.
+
+Stage 2.2 implements the Rust Tool Registry persistence and API with SQLite
+tables (`tools`, `tool_external_ids`, `tool_aliases`), CRUD endpoints,
+three-state identity resolution ported from Python to pure Rust, and
+approved source migration. External identifier uniqueness is enforced at the
+database level via a composite primary key.
+
+Stage 2.3 binds Run creation to the Tool Registry: `POST /api/runs` now
+accepts a `tool_id` that must reference an existing Tool, and freezes the
+canonical URL, name, and type as an immutable audit snapshot. A new
+`runs.tool_id` column (migration `0003`) ensures every new Run is anchored to
+a stable tool identity.
+
+The minimal Foundry contract groups commitments by `toolId -> runId` and
+records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
+runtime Profile selector, orchestrator subprocess, SSE, evidence, artifacts,
+passports, approval records, and onchain writes are not implemented yet.
 
 Product scope and architecture are tracked in:
 

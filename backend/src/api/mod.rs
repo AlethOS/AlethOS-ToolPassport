@@ -2,15 +2,18 @@ mod error;
 
 use axum::{
     Json, Router,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     routing::{get, post},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::{
-    domain::{AppendRunEventRequest, CreateRunRequest, Run, RunDetails, RunEvent},
+    domain::{
+        AddIdentifierRequest, AppendRunEventRequest, CreateRunRequest, CreateToolRequest,
+        ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
+    },
     repository::Repository,
     services::TrustCoreService,
 };
@@ -33,6 +36,16 @@ struct RunListResponse {
     runs: Vec<Run>,
 }
 
+#[derive(Debug, Serialize)]
+struct ToolListResponse {
+    tools: Vec<Tool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolQueryParams {
+    tool_id: String,
+}
+
 pub fn app(pool: SqlitePool) -> Router {
     let state = AppState {
         service: TrustCoreService::new(Repository::new(pool)),
@@ -43,6 +56,10 @@ pub fn app(pool: SqlitePool) -> Router {
         .route("/api/runs", post(create_run).get(list_runs))
         .route("/api/runs/{run_id}", get(get_run))
         .route("/api/runs/{run_id}/events", post(append_event))
+        .route("/api/tools", post(create_tool).get(list_tools))
+        .route("/api/tools/by-id", get(get_tool_by_query))
+        .route("/api/tools/resolve", post(resolve_tool))
+        .route("/api/tools/identifiers", post(add_identifier))
         .fallback(error::not_found)
         .method_not_allowed_fallback(error::method_not_allowed)
         .with_state(state)
@@ -85,4 +102,48 @@ async fn append_event(
     let Json(request) = payload.map_err(ApiError::invalid_json)?;
     let event = state.service.append_event(&run_id, request).await?;
     Ok((StatusCode::CREATED, Json(event)))
+}
+
+async fn create_tool(
+    State(state): State<AppState>,
+    payload: Result<Json<CreateToolRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<Tool>)> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let tool = state.service.create_tool(request).await?;
+    Ok((StatusCode::CREATED, Json(tool)))
+}
+
+async fn list_tools(State(state): State<AppState>) -> ApiResult<Json<ToolListResponse>> {
+    let tools = state.service.list_tools().await?;
+    Ok(Json(ToolListResponse { tools }))
+}
+
+async fn get_tool_by_query(
+    State(state): State<AppState>,
+    Query(params): Query<ToolQueryParams>,
+) -> ApiResult<Json<Tool>> {
+    let tool = state.service.get_tool(&params.tool_id).await?;
+    Ok(Json(tool))
+}
+
+async fn resolve_tool(
+    State(state): State<AppState>,
+    payload: Result<Json<ResolveToolRequest>, JsonRejection>,
+) -> ApiResult<Json<crate::domain::ResolutionResponse>> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let resolution = state.service.resolve_tool(request).await?;
+    Ok(Json(resolution))
+}
+
+async fn add_identifier(
+    State(state): State<AppState>,
+    Query(params): Query<ToolQueryParams>,
+    payload: Result<Json<AddIdentifierRequest>, JsonRejection>,
+) -> ApiResult<Json<Tool>> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let tool = state
+        .service
+        .add_identifier(&params.tool_id, request)
+        .await?;
+    Ok(Json(tool))
 }

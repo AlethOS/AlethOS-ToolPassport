@@ -1,0 +1,48 @@
+{
+  "fixture_version": "0.1.0",
+  "scenario_id": "possible_fork",
+  "description": "A matching name with a different GitHub repository may be a fork or migration and requires review.",
+  "existing_tools": [
+    {
+      "tool_schema_version": "0.1.0",
+      "tool_id": "github:upstream/tool",
+      "name": "Example Framework",
+      "tool_type": "agent_framework",
+      "canonical_url": "https://github.com/upstream/tool",
+      "external_identifiers": [
+        {
+          "namespace": "github",
+          "value": "upstream/tool",
+          "canonical_url": "https://github.com/upstream/tool"
+        }
+      ],
+      "aliases": []
+    }
+  ],
+  "intake": {
+    "intake_version": "0.1.0",
+    "name": "Example Framework",
+    "tool_type": "agent_framework",
+    "urls": [
+      "https://github.com/community/tool"
+    ]
+  },
+  "expected_resolution": {
+    "resolution_version": "0.1.0",
+    "status": "needs_review",
+    "normalized_identifiers": [
+      {
+        "namespace": "github",
+        "value": "community/tool",
+        "canonical_url": "https://github.com/community/tool"
+      }
+    ],
+    "tool_id": null,
+    "candidate_tool_ids": [
+      "github:upstream/tool"
+    ],
+    "reason_codes": [
+      "possible_fork_or_source_migration"
+    ]
+  }
+}

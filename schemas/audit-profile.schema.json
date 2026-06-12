@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/audit-profile.schema.json",
+  "title": "Audit Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile_id",
+    "profile_version",
+    "standard_id",
+    "standard_version",
+    "title",
+    "description",
+    "selection",
+    "scope_limitations",
+    "checks"
+  ],
+  "properties": {
+    "profile_id": {
+      "$ref": "#/$defs/stable_id"
+    },
+    "profile_version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "standard_id": {
+      "$ref": "#/$defs/stable_id"
+    },
+    "standard_version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "title": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "description": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "selection": {
+      "$ref": "#/$defs/selection"
+    },
+    "scope_limitations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/non_empty_string"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    }
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "semantic_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_type_candidates",
+        "minimum_confidence",
+        "fallback"
+      ],
+      "properties": {
+        "tool_type_candidates": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        },
+        "minimum_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fallback": {
+          "type": "boolean"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_id",
+        "dimension",
+        "question",
+        "weight",
+        "required_evidence_types",
+        "high_risk",
+        "scoring_rule_id"
+      ],
+      "properties": {
+        "check_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "dimension": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "question": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "weight": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 10
+        },
+        "required_evidence_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        },
+        "high_risk": {
+          "type": "boolean"
+        },
+        "scoring_rule_id": {
+          "$ref": "#/$defs/stable_id"
+        }
+      }
+    }
+  }
+}

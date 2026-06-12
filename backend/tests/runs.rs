@@ -15,6 +15,10 @@ use toolpassport_backend::{app, migrate};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+// ═══════════════════════════════════════════════════════════════════
+// Helpers (same pattern as tools.rs, vendored here for test isolation)
+// ═══════════════════════════════════════════════════════════════════
+
 #[tokio::test]
 async fn migrations_create_run_tables_and_append_only_triggers() {
     let pool = test_pool().await;
@@ -50,24 +54,26 @@ async fn migrations_create_run_tables_and_append_only_triggers() {
 #[tokio::test]
 async fn creates_and_queries_runs() {
     let (router, _) = test_app().await;
+
+    // Create a tool first, then bind the run to it.
+    let tool_id = create_github_tool(&router).await;
+
     let created = send_json(
         &router,
         Method::POST,
         "/api/runs",
         json!({
             "goal": "Audit the tool",
-            "tool": {
-                "name": "Example Tool",
-                "tool_type": "agent_framework",
-                "urls": ["https://example.com"]
-            }
+            "tool_id": tool_id
         }),
     )
     .await;
 
     assert_eq!(created.0, StatusCode::CREATED);
     assert_eq!(created.1["goal"], "Audit the tool");
-    assert_eq!(created.1["tool"]["name"], "Example Tool");
+    assert_eq!(created.1["tool_id"], tool_id);
+    assert_eq!(created.1["tool"]["name"], "example-lib");
+    assert_eq!(created.1["tool"]["tool_type"], "generic");
     assert_eq!(created.1["status"], "pending");
     let run_id = created.1["run_id"]
         .as_str()
@@ -94,13 +100,17 @@ async fn creates_and_queries_runs() {
     .await;
     assert_eq!(details.0, StatusCode::OK);
     assert_eq!(details.1["run"]["run_id"], run_id);
-    assert_eq!(details.1["events"], json!([]));
+    assert_eq!(details.1["run"]["tool_id"], tool_id);
+    assert_eq!(details.1["events"][0]["event_type"], "run_created");
+    assert_eq!(details.1["events"][0]["node_id"], "run");
+    assert_eq!(details.1["events"][0]["payload"]["status"], "pending");
 }
 
 #[tokio::test]
 async fn appends_events_in_order_and_rejects_mutation() {
     let (router, pool) = test_app().await;
-    let run_id = create_run(&router).await;
+    let tool_id = create_github_tool(&router).await;
+    let run_id = create_run(&router, &tool_id).await;
 
     let first = append_event(&router, &run_id, "plan_audit", "node_started").await;
     let second = append_event(&router, &run_id, "plan_audit", "node_finished").await;
@@ -120,8 +130,11 @@ async fn appends_events_in_order_and_rejects_mutation() {
     let events = details.1["events"]
         .as_array()
         .expect("events must be an array");
-    assert_eq!(events[0]["event_type"], "node_started");
-    assert_eq!(events[1]["event_type"], "node_finished");
+    assert_eq!(events[0]["event_type"], "run_created");
+    assert_eq!(events[1]["event_type"], "node_started");
+    assert_eq!(events[2]["event_type"], "node_finished");
+    assert_eq!(details.1["run"]["status"], "running");
+    assert_eq!(details.1["run"]["current_node"], "plan_audit");
 
     let event_id = first.1["event_id"]
         .as_str()
@@ -139,6 +152,92 @@ async fn appends_events_in_order_and_rejects_mutation() {
         .await
         .expect_err("event delete must be rejected");
     assert!(delete_error.to_string().contains("append-only"));
+}
+
+#[tokio::test]
+async fn projects_approval_and_terminal_status_events() {
+    let (router, _) = test_app().await;
+    let tool_id = create_github_tool(&router).await;
+    let run_id = create_run(&router, &tool_id).await;
+
+    let started = append_event(&router, &run_id, "plan_audit", "node_started").await;
+    assert_eq!(started.0, StatusCode::CREATED);
+
+    let approval_required =
+        append_event(&router, &run_id, "human_review_gate", "approval_required").await;
+    assert_eq!(approval_required.0, StatusCode::CREATED);
+    let details = get_run(&router, &run_id).await;
+    assert_eq!(details.1["run"]["status"], "waiting_approval");
+    assert_eq!(details.1["run"]["current_node"], "human_review_gate");
+
+    let blocked_node = append_event(&router, &run_id, "next_node", "node_started").await;
+    assert_error(&blocked_node, StatusCode::BAD_REQUEST, "invalid_request");
+
+    let approval_resolved =
+        append_event(&router, &run_id, "human_review_gate", "approval_resolved").await;
+    assert_eq!(approval_resolved.0, StatusCode::CREATED);
+
+    let finished = append_event_with_payload(
+        &router,
+        &run_id,
+        "finish",
+        "run_status_changed",
+        json!({"status": "success"}),
+    )
+    .await;
+    assert_eq!(finished.0, StatusCode::CREATED);
+
+    let details = get_run(&router, &run_id).await;
+    assert_eq!(details.1["run"]["status"], "success");
+    assert_eq!(details.1["run"]["current_node"], "finish");
+}
+
+#[tokio::test]
+async fn rejects_trust_core_owned_and_invalid_status_events() {
+    let (router, _) = test_app().await;
+    let tool_id = create_github_tool(&router).await;
+    let run_id = create_run(&router, &tool_id).await;
+
+    let duplicate_created = append_event(&router, &run_id, "run", "run_created").await;
+    assert_error(
+        &duplicate_created,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
+
+    let invalid_status = append_event_with_payload(
+        &router,
+        &run_id,
+        "finish",
+        "run_status_changed",
+        json!({"status": "cancelled"}),
+    )
+    .await;
+    assert_error(&invalid_status, StatusCode::BAD_REQUEST, "invalid_request");
+
+    let success_from_pending = append_event_with_payload(
+        &router,
+        &run_id,
+        "finish",
+        "run_status_changed",
+        json!({"status": "success"}),
+    )
+    .await;
+    assert_error(
+        &success_from_pending,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
+
+    let details = get_run(&router, &run_id).await;
+    assert_eq!(details.1["run"]["status"], "pending");
+    assert_eq!(
+        details.1["events"]
+            .as_array()
+            .expect("events must be an array")
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -163,27 +262,139 @@ async fn returns_json_errors_for_missing_runs() {
 async fn returns_json_errors_for_invalid_requests() {
     let (router, _) = test_app().await;
 
+    // Missing tool_id.
+    let response = send_json(
+        &router,
+        Method::POST,
+        "/api/runs",
+        json!({
+            "goal": "Audit the tool"
+        }),
+    )
+    .await;
+    assert_error(&response, StatusCode::BAD_REQUEST, "invalid_json");
+
+    // Empty goal.
     let response = send_json(
         &router,
         Method::POST,
         "/api/runs",
         json!({
             "goal": " ",
-            "tool": {
-                "name": "Example Tool",
-                "tool_type": "agent_framework"
-            }
+            "tool_id": "github:owner/repo"
         }),
     )
     .await;
     assert_error(&response, StatusCode::BAD_REQUEST, "invalid_request");
 
+    // Invalid JSON body.
     let response = send(&router, Method::POST, "/api/runs", Body::from("{invalid")).await;
     assert_error(&response, StatusCode::BAD_REQUEST, "invalid_json");
 
+    // Invalid run_id (not a UUID).
     let response = send(&router, Method::GET, "/api/runs/not-a-uuid", Body::empty()).await;
     assert_error(&response, StatusCode::BAD_REQUEST, "invalid_run_id");
 }
+
+#[tokio::test]
+async fn run_binding_requires_existing_tool() {
+    let (router, _) = test_app().await;
+
+    let response = send_json(
+        &router,
+        Method::POST,
+        "/api/runs",
+        json!({
+            "goal": "Audit a nonexistent tool",
+            "tool_id": "github:nonexistent/repo"
+        }),
+    )
+    .await;
+    assert_error(&response, StatusCode::NOT_FOUND, "tool_not_found");
+}
+
+#[tokio::test]
+async fn run_binding_freezes_tool_snapshot() {
+    let (router, _) = test_app().await;
+
+    // Create a tool.
+    let tool_id = create_github_tool(&router).await;
+
+    // Create a run bound to it — snapshot is frozen at creation time.
+    let run = send_json(
+        &router,
+        Method::POST,
+        "/api/runs",
+        json!({
+            "goal": "First audit",
+            "tool_id": &tool_id
+        }),
+    )
+    .await;
+    assert_eq!(run.0, StatusCode::CREATED);
+    let run_id = run.1["run_id"]
+        .as_str()
+        .expect("run_id must be present")
+        .to_owned();
+
+    // Fetch the run and verify the frozen snapshot fields.
+    let details = get_run(&router, &run_id).await;
+    assert_eq!(details.1["run"]["tool_id"], tool_id);
+    assert_eq!(
+        details.1["run"]["canonical_url"],
+        "https://github.com/example-org/example-lib"
+    );
+    assert_eq!(details.1["run"]["tool"]["name"], "example-lib");
+    assert_eq!(details.1["run"]["tool"]["tool_type"], "generic");
+    assert_eq!(
+        details.1["run"]["tool"]["urls"][0],
+        "https://github.com/example-org/example-lib"
+    );
+
+    // Update the Tool (add an alias) — the Run snapshot must NOT change.
+    let _alias_result = send_json(
+        &router,
+        Method::POST,
+        &format!("/api/tools/{tool_id}/identifiers"),
+        json!({
+            "identifier": {
+                "namespace": "url",
+                "value": "other.example.com/tool",
+                "canonical_url": "https://other.example.com/tool"
+            }
+        }),
+    )
+    .await;
+
+    // Re-fetch the run — snapshot unchanged.
+    let details_after = get_run(&router, &run_id).await;
+    assert_eq!(details_after.1["run"]["tool_id"], tool_id);
+    assert_eq!(
+        details_after.1["run"]["canonical_url"],
+        "https://github.com/example-org/example-lib"
+    );
+}
+
+#[tokio::test]
+async fn run_binding_rejects_invalid_tool_id_format() {
+    let (router, _) = test_app().await;
+
+    let response = send_json(
+        &router,
+        Method::POST,
+        "/api/runs",
+        json!({
+            "goal": "Invalid tool",
+            "tool_id": "not-a-namespaced-id"
+        }),
+    )
+    .await;
+    assert_error(&response, StatusCode::BAD_REQUEST, "invalid_tool_id_format");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Test infrastructure
+// ═══════════════════════════════════════════════════════════════════
 
 async fn test_app() -> (Router, SqlitePool) {
     let pool = test_pool().await;
@@ -203,21 +414,54 @@ async fn test_pool() -> SqlitePool {
     pool
 }
 
-async fn create_run(router: &Router) -> String {
+async fn create_github_tool(router: &Router) -> String {
+    let response = send_json(
+        router,
+        Method::POST,
+        "/api/tools",
+        json!({
+            "tool_id": "github:example-org/example-lib",
+            "name": "example-lib",
+            "tool_type": "generic",
+            "canonical_url": "https://github.com/example-org/example-lib",
+            "external_identifiers": [
+                {
+                    "namespace": "github",
+                    "value": "example-org/example-lib",
+                    "canonical_url": "https://github.com/example-org/example-lib"
+                }
+            ],
+            "aliases": ["Example Library"]
+        }),
+    )
+    .await;
+    assert_eq!(
+        response.0,
+        StatusCode::CREATED,
+        "tool creation must succeed: {response:?}"
+    );
+    response.1["tool_id"]
+        .as_str()
+        .expect("created tool must have an ID")
+        .to_owned()
+}
+
+async fn create_run(router: &Router, tool_id: &str) -> String {
     let response = send_json(
         router,
         Method::POST,
         "/api/runs",
         json!({
             "goal": "Audit the tool",
-            "tool": {
-                "name": "Example Tool",
-                "tool_type": "agent_framework"
-            }
+            "tool_id": tool_id
         }),
     )
     .await;
-    assert_eq!(response.0, StatusCode::CREATED);
+    assert_eq!(
+        response.0,
+        StatusCode::CREATED,
+        "run creation must succeed: {response:?}"
+    );
     response.1["run_id"]
         .as_str()
         .expect("created run must have an ID")
@@ -230,6 +474,16 @@ async fn append_event(
     node_id: &str,
     event_type: &str,
 ) -> (StatusCode, Value) {
+    append_event_with_payload(router, run_id, node_id, event_type, json!({})).await
+}
+
+async fn append_event_with_payload(
+    router: &Router,
+    run_id: &str,
+    node_id: &str,
+    event_type: &str,
+    payload: Value,
+) -> (StatusCode, Value) {
     send_json(
         router,
         Method::POST,
@@ -237,8 +491,18 @@ async fn append_event(
         json!({
             "node_id": node_id,
             "event_type": event_type,
-            "payload": {}
+            "payload": payload
         }),
+    )
+    .await
+}
+
+async fn get_run(router: &Router, run_id: &str) -> (StatusCode, Value) {
+    send(
+        router,
+        Method::GET,
+        &format!("/api/runs/{run_id}"),
+        Body::empty(),
     )
     .await
 }

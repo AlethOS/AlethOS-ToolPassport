@@ -72,6 +72,45 @@ impl From<ServiceError> for ApiError {
                 error.to_string(),
                 json!({}),
             ),
+            ServiceError::Conflict(message) => Self::new(
+                StatusCode::CONFLICT,
+                "run_state_conflict",
+                message,
+                json!({}),
+            ),
+            ServiceError::ToolNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "tool_not_found",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::InvalidToolIdFormat => Self::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_tool_id_format",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::ToolAlreadyExists => Self::new(
+                StatusCode::CONFLICT,
+                "tool_already_exists",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::IdentifierAlreadyClaimed(ref owner) => Self::new(
+                StatusCode::CONFLICT,
+                "identifier_already_claimed",
+                error.to_string(),
+                json!({ "claimed_by": owner }),
+            ),
+            ServiceError::InvalidUrl(detail) => {
+                Self::new(StatusCode::BAD_REQUEST, "invalid_url", detail, json!({}))
+            }
+            ServiceError::InvalidIntakeVersion => Self::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_intake_version",
+                error.to_string(),
+                json!({}),
+            ),
             ServiceError::Repository(_) => Self::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",

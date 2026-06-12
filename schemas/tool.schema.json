@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/tool.schema.json",
+  "title": "Canonical Tool Identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tool_schema_version",
+    "tool_id",
+    "name",
+    "tool_type",
+    "canonical_url",
+    "external_identifiers",
+    "aliases"
+  ],
+  "properties": {
+    "tool_schema_version": {
+      "const": "0.1.0"
+    },
+    "tool_id": {
+      "$ref": "#/$defs/tool_id"
+    },
+    "name": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "tool_type": {
+      "$ref": "#/$defs/tool_type"
+    },
+    "canonical_url": {
+      "$ref": "#/$defs/https_url"
+    },
+    "external_identifiers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/external_identifier"
+      }
+    },
+    "aliases": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/non_empty_string"
+      }
+    }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_type": {
+      "enum": [
+        "generic",
+        "agent_framework",
+        "mcp_server",
+        "cli_api_tool"
+      ]
+    },
+    "tool_id": {
+      "type": "string",
+      "pattern": "^(github|url):[^\\s]+$"
+    },
+    "https_url": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$"
+    },
+    "external_identifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "namespace",
+        "value",
+        "canonical_url"
+      ],
+      "properties": {
+        "namespace": {
+          "enum": [
+            "github",
+            "url"
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "canonical_url": {
+          "$ref": "#/$defs/https_url"
+        }
+      }
+    }
+  }
+}

@@ -17,10 +17,10 @@ pub struct ToolInput {
 #[serde(deny_unknown_fields)]
 pub struct CreateRunRequest {
     pub goal: String,
-    pub tool: ToolInput,
+    pub tool_id: String,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     Pending,
@@ -60,6 +60,8 @@ impl RunStatus {
 pub struct Run {
     pub run_id: Uuid,
     pub goal: String,
+    pub tool_id: String,
+    pub canonical_url: String,
     pub tool: ToolInput,
     pub status: RunStatus,
     pub current_node: Option<String>,

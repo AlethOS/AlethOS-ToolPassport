@@ -9,6 +9,7 @@
 data/
 runs/*
 !runs/.gitkeep
+docs/devlog/
 
 # Rust
 target/
