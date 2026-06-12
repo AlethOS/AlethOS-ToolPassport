@@ -1,0 +1,126 @@
+{
+  "profile_id": "mcp_server",
+  "profile_version": "0.2.0",
+  "standard_id": "alethos-toolpassport",
+  "standard_version": "0.2.0",
+  "title": "MCP Server Profile",
+  "description": "Checks for MCP servers that expose tools, resources, prompts, and external side effects.",
+  "selection": {
+    "tool_type_candidates": [
+      "mcp_server"
+    ],
+    "minimum_confidence": 0.75,
+    "fallback": false
+  },
+  "scope_limitations": [],
+  "checks": [
+    {
+      "check_id": "mcp_server.capability_scope",
+      "dimension": "capability_clarity",
+      "question": "Are exposed tools, resources, prompts, and known limitations documented?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "mcp_server.tool_schema",
+      "dimension": "interface_openness",
+      "question": "Are tool names, input schemas, output shapes, and error contracts documented and inspectable?",
+      "weight": 1.5,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "mcp_server.structured_invocation",
+      "dimension": "automation_readiness",
+      "question": "Can clients invoke the server through stable structured requests and responses?",
+      "weight": 1.25,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "mcp_server.error_handling",
+      "dimension": "automation_readiness",
+      "question": "Are automated failure responses, timeouts, and recovery behavior documented?",
+      "weight": 1.25,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "mcp_server.configuration_portability",
+      "dimension": "data_portability",
+      "question": "Can server configuration and integration settings be exported or reproduced?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "mcp_server.filesystem_shell_boundary",
+      "dimension": "permission_risk",
+      "question": "Are filesystem access, shell execution, and resulting side effects explicitly bounded?",
+      "weight": 2,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": true,
+      "scoring_rule_id": "bounded_risk_v1"
+    },
+    {
+      "check_id": "mcp_server.network_credential_scope",
+      "dimension": "permission_risk",
+      "question": "Are outbound network access and credential scopes explicit, minimal, and controllable?",
+      "weight": 2,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": true,
+      "scoring_rule_id": "bounded_risk_v1"
+    },
+    {
+      "check_id": "mcp_server.claim_traceability",
+      "dimension": "evidence_quality",
+      "question": "Are important capability and permission claims supported by reviewable evidence?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "mcp_server.client_compatibility",
+      "dimension": "ecosystem_fit",
+      "question": "Are supported clients, protocol compatibility, and integration guidance documented?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    }
+  ]
+}

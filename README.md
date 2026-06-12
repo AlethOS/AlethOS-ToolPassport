@@ -46,9 +46,10 @@ migrations on startup. The current Trust Core slice implements:
 Run events are append-only at both the API and SQLite trigger layers. The
 backend atomically creates the initial `run_created` event and projects
 validated node, approval, and terminal-status events into the Run summary.
-The repository also includes a versioned core Audit Standard plus `generic`
-and `agent_framework` Profile fixtures. They are validated offline against
-strict JSON Schemas and catalog cross-reference rules by:
+The repository also includes a versioned core Audit Standard plus `generic`,
+`agent_framework`, `mcp_server`, and `cli_api_tool` Profile fixtures. They are
+validated offline against strict JSON Schemas and catalog cross-reference
+rules by:
 
 ```bash
 scripts/check_schemas.sh
@@ -56,10 +57,9 @@ scripts/check_schemas.sh
 
 The minimal Foundry contract groups commitments by `toolId -> runId` and
 records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
-offchain Tool Registry, alias resolution, Run binding, `mcp_server` and
-`cli_api_tool` Profiles, runtime Profile selector, orchestrator subprocess,
-SSE, evidence, artifacts, passports, approval records, and onchain writes are
-not implemented yet.
+offchain Tool Registry, alias resolution, Run binding, runtime Profile
+selector, orchestrator subprocess, SSE, evidence, artifacts, passports,
+approval records, and onchain writes are not implemented yet.
 
 Product scope and architecture are tracked in:
 

@@ -18,6 +18,8 @@ class AuditCatalogValidationTests(unittest.TestCase):
         self.standard = load_json(ROOT / "standards" / "alethos-toolpassport" / "0.2.0.json")
         self.generic = load_json(ROOT / "profiles" / "generic" / "0.2.0.json")
         self.agent_framework = load_json(ROOT / "profiles" / "agent_framework" / "0.2.0.json")
+        self.mcp_server = load_json(ROOT / "profiles" / "mcp_server" / "0.2.0.json")
+        self.cli_api_tool = load_json(ROOT / "profiles" / "cli_api_tool" / "0.2.0.json")
 
     def validate(
         self,
@@ -26,7 +28,12 @@ class AuditCatalogValidationTests(unittest.TestCase):
         profiles: list[dict] | None = None,
     ) -> None:
         standard = standard or copy.deepcopy(self.standard)
-        profiles = profiles or [copy.deepcopy(self.generic), copy.deepcopy(self.agent_framework)]
+        profiles = profiles or [
+            copy.deepcopy(self.generic),
+            copy.deepcopy(self.agent_framework),
+            copy.deepcopy(self.mcp_server),
+            copy.deepcopy(self.cli_api_tool),
+        ]
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -56,8 +63,43 @@ class AuditCatalogValidationTests(unittest.TestCase):
             [
                 ROOT / "profiles" / "generic" / "0.2.0.json",
                 ROOT / "profiles" / "agent_framework" / "0.2.0.json",
+                ROOT / "profiles" / "mcp_server" / "0.2.0.json",
+                ROOT / "profiles" / "cli_api_tool" / "0.2.0.json",
             ],
         )
+
+    def test_committed_catalog_has_unique_candidates_and_one_fallback(self) -> None:
+        profiles = [self.generic, self.agent_framework, self.mcp_server, self.cli_api_tool]
+        candidates = [
+            candidate
+            for profile in profiles
+            for candidate in profile["selection"]["tool_type_candidates"]
+        ]
+        fallbacks = [profile["profile_id"] for profile in profiles if profile["selection"]["fallback"]]
+
+        self.assertEqual(len(candidates), len(set(candidates)))
+        self.assertEqual(fallbacks, ["generic"])
+
+    def test_mcp_server_declares_key_permission_checks_as_high_risk(self) -> None:
+        checks = {check["check_id"]: check for check in self.mcp_server["checks"]}
+
+        for check_id in (
+            "mcp_server.filesystem_shell_boundary",
+            "mcp_server.network_credential_scope",
+        ):
+            self.assertTrue(checks[check_id]["high_risk"])
+            self.assertEqual(checks[check_id]["scoring_rule_id"], "bounded_risk_v1")
+
+    def test_cli_api_tool_declares_side_effect_checks_as_high_risk(self) -> None:
+        checks = {check["check_id"]: check for check in self.cli_api_tool["checks"]}
+
+        for check_id in (
+            "cli_api_tool.credential_scope",
+            "cli_api_tool.destructive_action_control",
+            "cli_api_tool.paid_side_effect_control",
+        ):
+            self.assertTrue(checks[check_id]["high_risk"])
+            self.assertEqual(checks[check_id]["scoring_rule_id"], "bounded_risk_v1")
 
     def test_invalid_version_is_rejected(self) -> None:
         standard = copy.deepcopy(self.standard)
