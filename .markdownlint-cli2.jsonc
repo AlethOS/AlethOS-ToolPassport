@@ -1,0 +1,13 @@
+{
+  "config": {
+    "MD013": false
+  },
+  "globs": [
+    "README.md",
+    "AGENTS.md",
+    "docs/*.md",
+    "**/AGENTS.md",
+    "#docs/work-guide.md",
+    "#dashboard/node_modules/**"
+  ]
+}

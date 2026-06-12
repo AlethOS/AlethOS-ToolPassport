@@ -1,0 +1,14 @@
+{
+  "name": "alethos-toolpassport-dev-tools",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "lint:markdown": "markdownlint-cli2"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "0.22.1"
+  },
+  "overrides": {
+    "picomatch": "^2.3.2"
+  }
+}

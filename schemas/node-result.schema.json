@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/node-result.schema.json",
+  "title": "Node Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "node_id",
+    "status",
+    "summary",
+    "artifact_ids",
+    "errors",
+    "next"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "running",
+        "success",
+        "failed",
+        "waiting_approval",
+        "cancelled"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "artifact_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

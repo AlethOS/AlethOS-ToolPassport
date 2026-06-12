@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/passport.schema.json",
+  "title": "AI Tool Passport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "passport_version",
+    "tool",
+    "audit",
+    "capability_claims",
+    "interfaces",
+    "evidence",
+    "scores",
+    "recommendation",
+    "web3_attestation"
+  ],
+  "properties": {
+    "passport_version": {
+      "const": "0.1"
+    },
+    "tool": {
+      "type": "object"
+    },
+    "audit": {
+      "type": "object"
+    },
+    "capability_claims": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "interfaces": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "missing_evidence"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "evidence.schema.json"
+          }
+        },
+        "missing_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "scores": {
+      "$ref": "#/$defs/scores"
+    },
+    "recommendation": {
+      "type": "object"
+    },
+    "web3_attestation": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "reason",
+        "evidence_ids"
+      ],
+      "properties": {
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "reason": {
+          "type": "string"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_clarity",
+        "interface_openness",
+        "automation_readiness",
+        "data_portability",
+        "permission_risk",
+        "evidence_quality",
+        "ecosystem_fit",
+        "total_score",
+        "rating"
+      ],
+      "properties": {
+        "capability_clarity": {
+          "$ref": "#/$defs/dimension"
+        },
+        "interface_openness": {
+          "$ref": "#/$defs/dimension"
+        },
+        "automation_readiness": {
+          "$ref": "#/$defs/dimension"
+        },
+        "data_portability": {
+          "$ref": "#/$defs/dimension"
+        },
+        "permission_risk": {
+          "$ref": "#/$defs/dimension"
+        },
+        "evidence_quality": {
+          "$ref": "#/$defs/dimension"
+        },
+        "ecosystem_fit": {
+          "$ref": "#/$defs/dimension"
+        },
+        "total_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "readOnly": true
+        },
+        "rating": {
+          "enum": [
+            "not_recommended",
+            "manual_only",
+            "trial",
+            "low_risk",
+            "core_candidate"
+          ],
+          "readOnly": true
+        }
+      }
+    }
+  }
+}

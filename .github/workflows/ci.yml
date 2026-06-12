@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-and-schemas:
+    name: Docs and schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: scripts/check_schemas.sh
+      - run: scripts/check_docs.sh
+
+  backend:
+    name: Rust backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add clippy rustfmt
+      - run: scripts/check_backend.sh
+
+  orchestrator:
+    name: Python orchestrator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: orchestrator/requirements-dev.lock
+      - run: python -m venv orchestrator/.venv
+      - run: orchestrator/.venv/bin/python -m pip install -r orchestrator/requirements-dev.lock
+      - run: orchestrator/.venv/bin/python -m pip install --no-deps -e orchestrator
+      - run: scripts/check_orchestrator.sh
+
+  dashboard:
+    name: Next.js dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: ../scripts/check_dashboard.sh
+
+  contracts:
+    name: Foundry contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: scripts/check_contracts.sh
