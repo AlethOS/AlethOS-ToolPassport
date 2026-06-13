@@ -23,6 +23,9 @@ make check
 PyPI, and npm registries. It prints the selected Python and npm sources and
 supports `ALETHOS_PYPI_INDEX_URL` and `ALETHOS_NPM_REGISTRY` overrides. Trusted
 HTTPS mirrors are acceptable; lock files and project checks remain required.
+The existing orchestrator virtual environment also receives the pinned
+`jsonschema` tooling from `schemas/requirements.lock`; schema checks do not
+create a second Python virtual environment.
 The script does not read `.env`, install Foundry, start services, or perform
 wallet or chain operations.
 
@@ -35,8 +38,9 @@ cd orchestrator && PYTHONPATH=src .venv/bin/python scripts/run_graph_demo.py
 ```
 
 The backend defaults to `sqlite://../data/toolpassport.db` when started from
-`backend/`; set `DATABASE_URL` to override it. SQLx runs embedded SQLite
-migrations on startup. The current Trust Core slice implements:
+`backend/`; set `DATABASE_URL` to override it. It listens on
+`127.0.0.1:8080` by default; set `BIND_ADDR` to override it. SQLx runs embedded
+SQLite migrations on startup. The current Trust Core slice implements:
 
 - `POST /api/runs` — create an audit run bound to an existing Tool (accepts `tool_id`)
 - `GET /api/runs`
@@ -58,7 +62,8 @@ validated node, approval, and terminal-status events into the Run summary.
 The repository also includes a versioned core Audit Standard plus `generic`,
 `agent_framework`, `mcp_server`, and `cli_api_tool` Profile fixtures. They are
 validated offline against strict JSON Schemas and catalog cross-reference
-rules by:
+rules by the pinned Python `jsonschema` implementation. The check also validates
+every committed `*.schema.json` against the Draft 2020-12 meta-schema:
 
 ```bash
 scripts/check_schemas.sh
@@ -106,9 +111,42 @@ their final Rust-backed contracts are not implemented yet. The Dashboard does
 not calculate scores or Hashes and exposes no approval or chain-write action.
 
 The minimal Foundry contract groups commitments by `toolId -> runId` and
-records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
-orchestrator subprocess, SSE, event hash chain, persisted check results,
-passports, approval records, and onchain writes are not implemented yet.
+records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. Stage 5
+builds a deterministic JCS + SHA-256 hash chain over append-only Run Events.
+Stage 6 has published strict shared contracts for untrusted finding
+submissions, Rust-owned deterministic check results, frozen Evidence Boards
+and Manifests, Passport v0.2, Provenance, and an independent Attestation
+Receipt. Deterministic scoring, freeze persistence/API, the orchestrator
+subprocess, SSE, approval records, and onchain writes are not implemented yet.
+
+## Docker
+
+The root `Dockerfile` builds separate non-root runtime images for the Trust
+Core and Dashboard. It does not include `.env`, local databases, artifacts,
+dependency directories, the orchestrator mock, or Foundry tooling.
+
+Build and run the default Trust Core image:
+
+```bash
+docker build --target runtime -t alethos-toolpassport-backend .
+docker run --rm -p 8080:8080 \
+  -v alethos-data:/app/data \
+  -v alethos-runs:/app/runs \
+  alethos-toolpassport-backend
+```
+
+Build the Dashboard image separately:
+
+```bash
+docker build --target dashboard-runtime -t alethos-toolpassport-dashboard .
+docker run --rm -p 3000:3000 \
+  -e NEXT_PUBLIC_BACKEND_URL=http://host.docker.internal:8080 \
+  alethos-toolpassport-dashboard
+```
+
+On Linux, connect the Dashboard container to the backend through a user-defined
+Docker network and set `NEXT_PUBLIC_BACKEND_URL` to the backend container URL.
+The Dockerfile does not run chain operations or deploy contracts.
 
 Product scope and architecture are tracked in:
 

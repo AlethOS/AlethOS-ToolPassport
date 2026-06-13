@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/passport-v0.2.schema.json",
+  "title": "AI Tool Passport v0.2",
+  "description": "Immutable Passport content. Hashes and attestation receipts are stored separately.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "passport_version",
+    "passport_sequence",
+    "tool_id",
+    "run_id",
+    "tool_type",
+    "target_revision",
+    "audit_scope",
+    "standard_id",
+    "standard_version",
+    "profile_id",
+    "profile_version",
+    "evidence_board_version",
+    "check_results_id",
+    "capability_claims",
+    "interfaces",
+    "risks",
+    "known_gaps",
+    "scores",
+    "recommendation"
+  ],
+  "properties": {
+    "passport_version": {
+      "const": "0.2.0"
+    },
+    "passport_sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "tool_id": {
+      "type": "string",
+      "pattern": "^(github|url):[^\\s]+$"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tool_type": {
+      "enum": [
+        "generic",
+        "agent_framework",
+        "mcp_server",
+        "cli_api_tool"
+      ]
+    },
+    "target_revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "audit_scope": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "standard_id": {
+      "$ref": "#/$defs/stable_id"
+    },
+    "standard_version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "profile_id": {
+      "$ref": "#/$defs/stable_id"
+    },
+    "profile_version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "evidence_board_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "check_results_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "capability_claims": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence_bound_statement"
+      }
+    },
+    "interfaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence_bound_statement"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/risk"
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/non_empty_string"
+      }
+    },
+    "scores": {
+      "$ref": "#/$defs/scores"
+    },
+    "recommendation": {
+      "$ref": "#/$defs/recommendation"
+    }
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "semantic_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "evidence_bound_statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statement_id",
+        "statement",
+        "status",
+        "evidence_ids"
+      ],
+      "properties": {
+        "statement_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "statement": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "status": {
+          "enum": [
+            "supported",
+            "partially_supported",
+            "unsupported",
+            "contradicted",
+            "not_checked"
+          ]
+        },
+        "evidence_ids": {
+          "$ref": "#/$defs/evidence_ids"
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "risk_id",
+        "title",
+        "severity",
+        "description",
+        "mitigation",
+        "evidence_ids"
+      ],
+      "properties": {
+        "risk_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "title": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "mitigation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_ids": {
+          "$ref": "#/$defs/evidence_ids"
+        }
+      }
+    },
+    "dimension_scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_clarity",
+        "interface_openness",
+        "automation_readiness",
+        "data_portability",
+        "permission_risk",
+        "evidence_quality",
+        "ecosystem_fit"
+      ],
+      "properties": {
+        "capability_clarity": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "interface_openness": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "automation_readiness": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "data_portability": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "permission_risk": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "evidence_quality": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "ecosystem_fit": {
+          "$ref": "#/$defs/dimension_score"
+        }
+      }
+    },
+    "dimension_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "readOnly": true
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimensions",
+        "total_score",
+        "rating"
+      ],
+      "properties": {
+        "dimensions": {
+          "$ref": "#/$defs/dimension_scores"
+        },
+        "total_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "readOnly": true
+        },
+        "rating": {
+          "enum": [
+            "not_recommended",
+            "manual_only",
+            "trial",
+            "low_risk",
+            "core_candidate"
+          ],
+          "readOnly": true
+        }
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "conditions"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/non_empty_string"
+          }
+        }
+      }
+    }
+  }
+}

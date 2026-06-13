@@ -90,6 +90,7 @@ done
 printf '\n%s\n' "Module toolchains"
 manifest_tool "backend/Cargo.toml" cargo "backend checks"
 manifest_tool "orchestrator/pyproject.toml" python3 "orchestrator checks"
+manifest_tool "schemas/requirements.lock" python3 "JSON Schema meta-validation"
 manifest_tool "dashboard/package.json" npm "dashboard checks"
 manifest_tool "contracts/foundry.toml" forge "contract checks"
 recommend_command forge "Foundry contract development"
@@ -125,6 +126,15 @@ if [[ -f "$ROOT/orchestrator/pyproject.toml" ]]; then
     fi
   else
     fail "Run make bootstrap to install orchestrator local dependencies"
+  fi
+fi
+
+if [[ -f "$ROOT/schemas/requirements.lock" ]]; then
+  if [[ -x "$ROOT/orchestrator/.venv/bin/python" ]] \
+    && "$ROOT/orchestrator/.venv/bin/python" -c "import jsonschema" >/dev/null 2>&1; then
+    ok "JSON Schema meta-validator installed"
+  else
+    fail "Run make bootstrap to install JSON Schema meta-validation dependencies"
   fi
 fi
 

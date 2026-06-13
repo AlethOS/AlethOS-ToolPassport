@@ -21,7 +21,13 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: schemas/requirements.lock
       - run: npm ci
+      - run: python -m pip install -r schemas/requirements.lock
       - run: scripts/check_schemas.sh
       - run: scripts/check_docs.sh
 

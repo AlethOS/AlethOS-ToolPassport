@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/evidence-manifest.schema.json",
+  "title": "Frozen Evidence Manifest",
+  "description": "Canonical evidence commitments used to calculate evidenceManifestHash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence_manifest_schema_version",
+    "run_id",
+    "evidence_board_version",
+    "entries"
+  ],
+  "properties": {
+    "evidence_manifest_schema_version": {
+      "const": "0.1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "evidence_board_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "entries": {
+      "description": "Entries sorted by evidence_id before JCS canonicalization and hashing.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "content_hash",
+        "snapshot_artifact_id",
+        "snapshot_hash"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "snapshot_artifact_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "snapshot_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^0x[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/check-results.schema.json",
+  "title": "Deterministic Check Results",
+  "description": "Rust-owned check results and deterministic aggregate scores.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "check_results_schema_version",
+    "check_results_id",
+    "run_id",
+    "evidence_board_version",
+    "standard_id",
+    "standard_version",
+    "profile_id",
+    "profile_version",
+    "results",
+    "dimension_scores",
+    "total_score",
+    "rating",
+    "computed_at"
+  ],
+  "properties": {
+    "check_results_schema_version": {
+      "const": "0.1.0"
+    },
+    "check_results_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "evidence_board_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "standard_id": {
+      "$ref": "#/$defs/stable_id"
+    },
+    "standard_version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "profile_id": {
+      "$ref": "#/$defs/stable_id"
+    },
+    "profile_version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "results": {
+      "description": "Results in the exact order declared by the bound Profile.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/result"
+      }
+    },
+    "dimension_scores": {
+      "$ref": "#/$defs/dimension_scores"
+    },
+    "total_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "readOnly": true
+    },
+    "rating": {
+      "$ref": "#/$defs/rating"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time",
+      "readOnly": true
+    }
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "semantic_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "finding": {
+      "enum": [
+        "pass",
+        "partial",
+        "fail",
+        "unknown",
+        "not_applicable"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_id",
+        "dimension",
+        "finding",
+        "rationale",
+        "evidence_ids",
+        "not_applicable_reason",
+        "weight",
+        "high_risk",
+        "scoring_rule_id",
+        "rule_points",
+        "weighted_points",
+        "applicable"
+      ],
+      "properties": {
+        "check_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "dimension": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "finding": {
+          "$ref": "#/$defs/finding"
+        },
+        "rationale": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "evidence_ids": {
+          "$ref": "#/$defs/evidence_ids"
+        },
+        "not_applicable_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "weight": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 10,
+          "readOnly": true
+        },
+        "high_risk": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "scoring_rule_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "rule_points": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "readOnly": true
+        },
+        "weighted_points": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "readOnly": true
+        },
+        "applicable": {
+          "type": "boolean",
+          "readOnly": true
+        }
+      }
+    },
+    "dimension_score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "earned_weighted_points",
+        "applicable_weight"
+      ],
+      "properties": {
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "readOnly": true
+        },
+        "earned_weighted_points": {
+          "type": "number",
+          "minimum": 0,
+          "readOnly": true
+        },
+        "applicable_weight": {
+          "type": "number",
+          "minimum": 0,
+          "readOnly": true
+        }
+      }
+    },
+    "dimension_scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability_clarity",
+        "interface_openness",
+        "automation_readiness",
+        "data_portability",
+        "permission_risk",
+        "evidence_quality",
+        "ecosystem_fit"
+      ],
+      "properties": {
+        "capability_clarity": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "interface_openness": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "automation_readiness": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "data_portability": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "permission_risk": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "evidence_quality": {
+          "$ref": "#/$defs/dimension_score"
+        },
+        "ecosystem_fit": {
+          "$ref": "#/$defs/dimension_score"
+        }
+      }
+    },
+    "rating": {
+      "enum": [
+        "not_recommended",
+        "manual_only",
+        "trial",
+        "low_risk",
+        "core_candidate"
+      ],
+      "readOnly": true
+    }
+  }
+}

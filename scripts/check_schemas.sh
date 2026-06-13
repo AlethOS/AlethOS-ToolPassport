@@ -22,11 +22,22 @@ command -v python3 >/dev/null 2>&1 || {
   exit 1
 }
 
+schema_python="python3"
+if [[ -x "$ROOT/orchestrator/.venv/bin/python" ]]; then
+  schema_python="$ROOT/orchestrator/.venv/bin/python"
+fi
+
+"$schema_python" -c "import jsonschema" >/dev/null 2>&1 || {
+  printf '%s\n' "[HUMAN REQUIRED] Run make bootstrap to install the pinned JSON Schema validator."
+  exit 1
+}
+
 for json_file in "${json_files[@]}"; do
   jq -e . "$json_file" >/dev/null
   printf 'PASS %s\n' "${json_file#"$ROOT/"}"
 done
 
-python3 "$ROOT/scripts/validate_audit_catalog.py"
-python3 "$ROOT/scripts/validate_tool_identity.py"
-python3 -m unittest discover -s "$ROOT/schemas/tests" -p 'test_*.py'
+"$schema_python" "$ROOT/scripts/validate_json_schemas.py"
+"$schema_python" "$ROOT/scripts/validate_audit_catalog.py"
+"$schema_python" "$ROOT/scripts/validate_tool_identity.py"
+"$schema_python" -m unittest discover -s "$ROOT/schemas/tests" -p 'test_*.py'

@@ -22,7 +22,8 @@ async fn main() {
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_MAX_STORED_BYTES);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
         .expect("backend listener must bind");
 
