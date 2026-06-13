@@ -742,7 +742,8 @@ fn compute_event_hash(
         "created_at": created_at,
         "prev_event_hash": prev_event_hash,
     });
-    let canonical_bytes = serde_json_canonicalizer::to_string(&canonical_input).unwrap_or_default();
+    let canonical_bytes = serde_json_canonicalizer::to_string(&canonical_input)
+        .expect("JCS canonicalization must succeed for deterministic event hash");
     let mut hasher = Sha256::new();
     hasher.update(canonical_bytes.as_bytes());
     format!("0x{}", hex::encode(hasher.finalize()))
