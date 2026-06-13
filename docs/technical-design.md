@@ -708,13 +708,13 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 | --- | --- | --- |
 | Tool Registry / Run binding | Stage 2 已实现；Tool Registry、身份解析 API 与 `runs.tool_id` binding 已完成 | Compatible；Run 冻结 Tool name/type/canonical URL 快照，人工确认策略继续保留 |
 | Rust Run API | 已实现绑定 Tool 的创建、列表、详情和事件追加 | Partial foundation；尚未自动启动 orchestrator 或提供 SSE |
-| Append-only Event | SQLite sequence、更新/删除 trigger 已实现 | Partial；尚无公开 sequence、决策事件、`prev_event_hash` 或 `event_hash` |
+| Append-only Event / Hash Chain | SQLite sequence、更新/删除 trigger、JCS+SHA-256 哈希链已实现 | Implemented；24 个事件类型（含 13 个 v0.2 决策事件），`sequence` 公开，`event_hash` / `prev_event_hash` 在事务内计算，7 个聚焦测试覆盖链完整性 |
 | Orchestrator | Stage 3 离线 Pydantic 调查 mock 已实现 | Partial；已有 Profile、Board、Gap、停止条件和 Skeptic Review mock，尚未接后端、真实来源、恢复或人工等待 |
 | Evidence / Artifact | Stage 4 已实现严格 schema、SQLx 迁移、StorageService、API 和创建事件 | Implemented；Rust 分配 ID/路径、限制大小、计算实际字节 Hash，并在 DB 失败时清理文件；Orchestrator 接入、内容读取与前端展示待实现 |
 | Audit Standard / Profile | Stage 1 已完成：v0.2 core schema、Standard、四个 Profile fixtures 和离线 catalog 校验 | Compatible target inputs；Stage 3 已有离线 selector mock，生产级 selector 尚未接真实来源与 Run 持久化 |
 | Passport 与评分 | v0.1 schema 允许七维分数，字段约束较松 | Conflict to resolve；目标 check-level 评分和 Rust 聚合尚未实现 |
 | `web3_attestation` | v0.1 Passport 必填对象 | Design conflict；回执若写回会改变已冻结 Passport，必须独立存储并在 v0.2 分离 |
-| Audit Log Hash | 文档曾按时间与 event ID 排序 | Conflict to resolve；数据库已有更可靠 sequence，目标应按 sequence 建哈希链 |
+| Audit Log Hash | 已实现按 sequence 序的 JCS+SHA-256 哈希链 | Resolved；`auditLogHash` 定义为 `provenance_frozen` 事件哈希，Stage 6 实现冻结边界 |
 | Dashboard | 已实现只读双语 Trust Control Desk、Run/Event 轮询和隔离 Preview 视图 | Partial；尚无 SSE、真实 Board/Score/Hash/Passport、写操作或 approval UI |
 | Registry | 最小 commitment 合约和 Foundry tests 已实现 | Compatible；按 `toolId -> runId` 聚合，并保存三个 Hash、auditor 和 timestamp；链下 Tool Registry 仍待实现 |
 | README | 已准确标记当前未实现能力 | Compatible；实现每个迁移阶段后继续同步 |
@@ -734,7 +734,7 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
    Gap、停止条件、Skeptic Review 与受限 `audit_directives` 影响；尚未接后端、
    真实来源、恢复或人工等待。
 4. **Evidence and Artifact trust core**：已完成 Artifact v0.1 与 Evidence v0.2 schema、migration、受限 API、Rust ID/路径分配、实际字节 Hash、创建事件、失败清理和路径隔离。
-5. **Decision events and hash chain**：发布 run-event v0.2，加入 sequence、决策事件和事件哈希链；迁移所有消费者。
+5. **Decision events and hash chain**：已完成 run-event v0.2，加入 sequence、决策事件和 JCS+SHA-256 事件哈希链；迁移所有消费者。
 6. **Deterministic checks and Passport v0.2**：Rust 实现 check 规则、评分聚合、JCS Hash、`evidenceManifestHash`，并把 Attestation Receipt 从 Passport 分离。
 7. **SSE, recovery, and Dashboard**：接入 checkpoint、恢复、Tool Index、实时 Graph、Evidence Board、Gap Tracker 和 Decision Log。
 8. **Human gate and testnet attestation**：实现绑定 Tool、Run 和 Hash 的审批与独立回执；任何真实提交仍需人工批准。

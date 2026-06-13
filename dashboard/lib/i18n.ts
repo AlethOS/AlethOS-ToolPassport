@@ -153,6 +153,19 @@ const en = {
   eventAttestationSubmitted: "Attestation submitted",
   eventAttestationConfirmed: "Attestation confirmed",
   eventError: "Error",
+  eventProfileSelected: "Profile selected",
+  eventHypothesisCreated: "Hypothesis created",
+  eventHypothesisUpdated: "Hypothesis updated",
+  eventResearchQueryPlanned: "Research query planned",
+  eventGapDetected: "Gap detected",
+  eventEvidenceLinked: "Evidence linked",
+  eventClaimContradicted: "Claim contradicted",
+  eventEvidenceBoardFrozen: "Evidence board frozen",
+  eventReviewIssueFound: "Review issue found",
+  eventScoreChanged: "Score changed",
+  eventDirectivesAccepted: "Directives accepted",
+  eventHumanFeedbackReceived: "Human feedback received",
+  eventProvenanceFrozen: "Provenance frozen",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -308,6 +321,19 @@ const zh: Record<keyof typeof en, string> = {
   eventAttestationSubmitted: "证明已提交",
   eventAttestationConfirmed: "证明已确认",
   eventError: "错误",
+  eventProfileSelected: "已选择配置",
+  eventHypothesisCreated: "已创建假设",
+  eventHypothesisUpdated: "已更新假设",
+  eventResearchQueryPlanned: "已计划研究查询",
+  eventGapDetected: "已检测缺口",
+  eventEvidenceLinked: "已链接证据",
+  eventClaimContradicted: "主张已矛盾",
+  eventEvidenceBoardFrozen: "证据板已冻结",
+  eventReviewIssueFound: "已发现问题",
+  eventScoreChanged: "评分已变化",
+  eventDirectivesAccepted: "指令已接受",
+  eventHumanFeedbackReceived: "已收到人工反馈",
+  eventProvenanceFrozen: "溯源已冻结",
 };
 
 export type TranslationKey = keyof typeof en;

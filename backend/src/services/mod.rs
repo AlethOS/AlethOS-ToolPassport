@@ -8,7 +8,7 @@ use crate::{
         AddIdentifierRequest, AppendRunEventRequest, Artifact, CreateArtifactRequest,
         CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, ExternalIdentifier,
         ReasonCode, ResolutionResponse, ResolutionStatus, ResolveToolRequest, Run, RunDetails,
-        RunEvent, RunEventType, RunStatus, Tool, ToolInput,
+        RunEvent, RunEventType, RunStatus, Tool, ToolInput, ZERO_HASH,
     },
     repository::{Repository, RepositoryError},
 };
@@ -99,6 +99,8 @@ impl TrustCoreService {
                 Value::String(RunStatus::Pending.as_str().to_owned()),
             )]),
             created_at: now,
+            event_hash: String::new(), // computed by repository
+            prev_event_hash: ZERO_HASH.to_owned(),
         };
 
         self.repository
@@ -146,6 +148,8 @@ impl TrustCoreService {
             event_type: request.event_type,
             payload: request.payload,
             created_at: Utc::now(),
+            event_hash: String::new(),      // computed by repository
+            prev_event_hash: String::new(), // computed by repository
         };
 
         self.repository
@@ -664,6 +668,8 @@ fn generated_event(run_id: Uuid, event_type: RunEventType, payload: Value) -> Ru
         event_type,
         payload: payload.as_object().cloned().unwrap_or_default(),
         created_at: Utc::now(),
+        event_hash: String::new(),      // computed by repository
+        prev_event_hash: String::new(), // computed by repository
     }
 }
 
