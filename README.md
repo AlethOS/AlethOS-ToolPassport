@@ -35,8 +35,9 @@ cd orchestrator && PYTHONPATH=src .venv/bin/python scripts/run_graph_demo.py
 ```
 
 The backend defaults to `sqlite://../data/toolpassport.db` when started from
-`backend/`; set `DATABASE_URL` to override it. SQLx runs embedded SQLite
-migrations on startup. The current Trust Core slice implements:
+`backend/`; set `DATABASE_URL` to override it. It listens on
+`127.0.0.1:8080` by default; set `BIND_ADDR` to override it. SQLx runs embedded
+SQLite migrations on startup. The current Trust Core slice implements:
 
 - `POST /api/runs` — create an audit run bound to an existing Tool (accepts `tool_id`)
 - `GET /api/runs`
@@ -109,6 +110,35 @@ The minimal Foundry contract groups commitments by `toolId -> runId` and
 records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
 orchestrator subprocess, SSE, event hash chain, persisted check results,
 passports, approval records, and onchain writes are not implemented yet.
+
+## Docker
+
+The root `Dockerfile` builds separate non-root runtime images for the Trust
+Core and Dashboard. It does not include `.env`, local databases, artifacts,
+dependency directories, the orchestrator mock, or Foundry tooling.
+
+Build and run the default Trust Core image:
+
+```bash
+docker build --target runtime -t alethos-toolpassport-backend .
+docker run --rm -p 8080:8080 \
+  -v alethos-data:/app/data \
+  -v alethos-runs:/app/runs \
+  alethos-toolpassport-backend
+```
+
+Build the Dashboard image separately:
+
+```bash
+docker build --target dashboard-runtime -t alethos-toolpassport-dashboard .
+docker run --rm -p 3000:3000 \
+  -e NEXT_PUBLIC_BACKEND_URL=http://host.docker.internal:8080 \
+  alethos-toolpassport-dashboard
+```
+
+On Linux, connect the Dashboard container to the backend through a user-defined
+Docker network and set `NEXT_PUBLIC_BACKEND_URL` to the backend container URL.
+The Dockerfile does not run chain operations or deploy contracts.
 
 Product scope and architecture are tracked in:
 
