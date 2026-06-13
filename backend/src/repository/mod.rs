@@ -1,17 +1,19 @@
 use std::{str::FromStr, time::Duration};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::{
     FromRow, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
+use std::ops::DerefMut;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
     Artifact, Evidence, EvidenceSourceType, ExternalIdentifier, Run, RunEvent, RunEventType,
-    RunStatus, Tool, ToolInput, ToolType,
+    RunStatus, Tool, ToolInput, ToolType, ZERO_HASH,
 };
 
 #[derive(Debug, Error)]
@@ -72,20 +74,36 @@ impl Repository {
         .execute(&mut *transaction)
         .await?;
 
+        // First event: sequence = 1, prev_hash = zero.
+        let run_id_str = run.run_id.to_string();
+        let created_at_str = format_timestamp(created_event.created_at);
+        let event_hash = compute_event_hash(
+            &run_id_str,
+            1,
+            &created_event.node_id,
+            created_event.event_type.as_str(),
+            &created_event.payload,
+            &created_at_str,
+            ZERO_HASH,
+        );
+
         sqlx::query(
             r#"
             INSERT INTO run_events (
-                event_id, run_id, sequence, node_id, event_type, payload, created_at
+                event_id, run_id, sequence, node_id, event_type, payload,
+                created_at, event_hash, prev_event_hash
             )
-            VALUES (?, ?, 1, ?, ?, ?, ?)
+            VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(created_event.event_id.to_string())
-        .bind(created_event.run_id.to_string())
+        .bind(&run_id_str)
         .bind(&created_event.node_id)
         .bind(created_event.event_type.as_str())
         .bind(event_payload)
-        .bind(format_timestamp(created_event.created_at))
+        .bind(&created_at_str)
+        .bind(&event_hash)
+        .bind(ZERO_HASH)
         .execute(&mut *transaction)
         .await?;
 
@@ -135,6 +153,7 @@ impl Repository {
             .map_err(|error| RepositoryError::InvalidStoredData(error.to_string()))?;
         let mut transaction = self.pool.begin().await?;
         let next_status = next_status.map(RunStatus::as_str);
+        let run_id_str = event.run_id.to_string();
 
         let update = sqlx::query(
             r#"
@@ -148,7 +167,7 @@ impl Repository {
         .bind(next_status)
         .bind(current_node)
         .bind(format_timestamp(event.created_at))
-        .bind(event.run_id.to_string())
+        .bind(&run_id_str)
         .bind(expected_status.as_str())
         .execute(&mut *transaction)
         .await?;
@@ -157,24 +176,40 @@ impl Repository {
             return Err(RepositoryError::RunStateChanged);
         }
 
+        // Determine next sequence and previous hash before inserting.
+        let (next_seq, prev_event_hash) =
+            next_sequence_and_prev_hash(&mut transaction, &run_id_str).await;
+        let created_at_str = format_timestamp(event.created_at);
+        let event_hash = compute_event_hash(
+            &run_id_str,
+            next_seq,
+            &event.node_id,
+            event.event_type.as_str(),
+            &event.payload,
+            &created_at_str,
+            &prev_event_hash,
+        );
+
         let row = sqlx::query_as::<_, RunEventRow>(
             r#"
             INSERT INTO run_events (
-                event_id, run_id, sequence, node_id, event_type, payload, created_at
+                event_id, run_id, sequence, node_id, event_type, payload,
+                created_at, event_hash, prev_event_hash
             )
-            SELECT ?, ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ?
-            FROM run_events
-            WHERE run_id = ?
-            RETURNING event_id, run_id, sequence, node_id, event_type, payload, created_at
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING event_id, run_id, sequence, node_id, event_type, payload,
+                      created_at, event_hash, prev_event_hash
             "#,
         )
         .bind(event.event_id.to_string())
-        .bind(event.run_id.to_string())
+        .bind(&run_id_str)
+        .bind(next_seq)
         .bind(&event.node_id)
         .bind(event.event_type.as_str())
-        .bind(payload)
-        .bind(format_timestamp(event.created_at))
-        .bind(event.run_id.to_string())
+        .bind(&payload)
+        .bind(&created_at_str)
+        .bind(&event_hash)
+        .bind(&prev_event_hash)
         .fetch_one(&mut *transaction)
         .await?;
 
@@ -185,7 +220,8 @@ impl Repository {
     pub async fn list_events(&self, run_id: Uuid) -> Result<Vec<RunEvent>, RepositoryError> {
         let rows = sqlx::query_as::<_, RunEventRow>(
             r#"
-            SELECT event_id, run_id, sequence, node_id, event_type, payload, created_at
+            SELECT event_id, run_id, sequence, node_id, event_type, payload,
+                   created_at, event_hash, prev_event_hash
             FROM run_events
             WHERE run_id = ?
             ORDER BY sequence ASC
@@ -652,6 +688,8 @@ struct RunEventRow {
     event_type: String,
     payload: String,
     created_at: String,
+    event_hash: String,
+    prev_event_hash: String,
 }
 
 impl TryFrom<RunEventRow> for RunEvent {
@@ -672,12 +710,64 @@ impl TryFrom<RunEventRow> for RunEvent {
             payload: serde_json::from_str::<Map<String, Value>>(&row.payload)
                 .map_err(invalid_stored_data)?,
             created_at: parse_timestamp(&row.created_at)?,
+            event_hash: row.event_hash,
+            prev_event_hash: row.prev_event_hash,
         })
     }
 }
 
 fn format_timestamp(timestamp: DateTime<Utc>) -> String {
     timestamp.to_rfc3339_opts(SecondsFormat::Micros, true)
+}
+
+/// Compute the deterministic event hash: SHA-256(JCS(canonical_input)).
+///
+/// The canonical input includes all fields except `event_hash` itself:
+/// `run_id`, `sequence`, `node_id`, `event_type`, `payload`, `created_at`, `prev_event_hash`.
+fn compute_event_hash(
+    run_id: &str,
+    sequence: i64,
+    node_id: &str,
+    event_type: &str,
+    payload: &Map<String, Value>,
+    created_at: &str,
+    prev_event_hash: &str,
+) -> String {
+    let canonical_input = json!({
+        "run_id": run_id,
+        "sequence": sequence,
+        "node_id": node_id,
+        "event_type": event_type,
+        "payload": payload,
+        "created_at": created_at,
+        "prev_event_hash": prev_event_hash,
+    });
+    let canonical_bytes = serde_json_canonicalizer::to_string(&canonical_input).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical_bytes.as_bytes());
+    format!("0x{}", hex::encode(hasher.finalize()))
+}
+
+/// Determine the next sequence number and previous hash for a run within a transaction.
+async fn next_sequence_and_prev_hash(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    run_id: &str,
+) -> (i64, String) {
+    let conn = transaction.deref_mut();
+    let row: Option<(Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT MAX(sequence), (SELECT event_hash FROM run_events WHERE run_id = ? ORDER BY sequence DESC LIMIT 1) FROM run_events WHERE run_id = ?"
+    )
+    .bind(run_id)
+    .bind(run_id)
+    .fetch_optional(conn)
+    .await
+    .ok()
+    .flatten();
+
+    match row {
+        Some((Some(max_seq), Some(prev_hash))) => (max_seq + 1, prev_hash),
+        _ => (1, ZERO_HASH.to_owned()),
+    }
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, RepositoryError> {
@@ -847,29 +937,43 @@ async fn insert_generated_event(
     event: &RunEvent,
     payload: &str,
 ) -> Result<(), RepositoryError> {
+    let run_id_str = event.run_id.to_string();
+    let (next_seq, prev_event_hash) = next_sequence_and_prev_hash(transaction, &run_id_str).await;
+    let created_at_str = format_timestamp(event.created_at);
+    let event_hash = compute_event_hash(
+        &run_id_str,
+        next_seq,
+        &event.node_id,
+        event.event_type.as_str(),
+        &event.payload,
+        &created_at_str,
+        &prev_event_hash,
+    );
+
     sqlx::query(
         r#"
         INSERT INTO run_events (
-            event_id, run_id, sequence, node_id, event_type, payload, created_at
+            event_id, run_id, sequence, node_id, event_type, payload,
+            created_at, event_hash, prev_event_hash
         )
-        SELECT ?, ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ?
-        FROM run_events
-        WHERE run_id = ?
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(event.event_id.to_string())
-    .bind(event.run_id.to_string())
+    .bind(&run_id_str)
+    .bind(next_seq)
     .bind(&event.node_id)
     .bind(event.event_type.as_str())
     .bind(payload)
-    .bind(format_timestamp(event.created_at))
-    .bind(event.run_id.to_string())
+    .bind(&created_at_str)
+    .bind(&event_hash)
+    .bind(&prev_event_hash)
     .execute(&mut **transaction)
     .await?;
 
     sqlx::query("UPDATE runs SET updated_at = ? WHERE run_id = ?")
-        .bind(format_timestamp(event.created_at))
-        .bind(event.run_id.to_string())
+        .bind(&created_at_str)
+        .bind(&run_id_str)
         .execute(&mut **transaction)
         .await?;
 

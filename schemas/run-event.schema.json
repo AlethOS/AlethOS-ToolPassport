@@ -2,16 +2,26 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://alethos.local/schemas/run-event.schema.json",
   "title": "Run Event",
+  "description": "Run Event v0.2 — append-only audit event with hash chain linkage.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "event_id",
     "run_id",
+    "sequence",
     "node_id",
     "event_type",
     "payload",
-    "created_at"
+    "created_at",
+    "event_hash",
+    "prev_event_hash"
   ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    }
+  },
   "properties": {
     "event_id": {
       "type": "string",
@@ -20,6 +30,10 @@
     "run_id": {
       "type": "string",
       "format": "uuid"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
     },
     "node_id": {
       "type": "string",
@@ -37,7 +51,20 @@
         "approval_resolved",
         "attestation_submitted",
         "attestation_confirmed",
-        "error"
+        "error",
+        "profile_selected",
+        "hypothesis_created",
+        "hypothesis_updated",
+        "research_query_planned",
+        "gap_detected",
+        "evidence_linked",
+        "claim_contradicted",
+        "evidence_board_frozen",
+        "review_issue_found",
+        "score_changed",
+        "directives_accepted",
+        "human_feedback_received",
+        "provenance_frozen"
       ]
     },
     "payload": {
@@ -46,6 +73,12 @@
     "created_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "event_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "prev_event_hash": {
+      "$ref": "#/$defs/sha256"
     }
   }
 }

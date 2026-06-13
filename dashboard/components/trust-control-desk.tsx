@@ -64,6 +64,19 @@ const eventKeys: Record<RunEvent["event_type"], TranslationKey> = {
   attestation_submitted: "eventAttestationSubmitted",
   attestation_confirmed: "eventAttestationConfirmed",
   error: "eventError",
+  profile_selected: "eventProfileSelected",
+  hypothesis_created: "eventHypothesisCreated",
+  hypothesis_updated: "eventHypothesisUpdated",
+  research_query_planned: "eventResearchQueryPlanned",
+  gap_detected: "eventGapDetected",
+  evidence_linked: "eventEvidenceLinked",
+  claim_contradicted: "eventClaimContradicted",
+  evidence_board_frozen: "eventEvidenceBoardFrozen",
+  review_issue_found: "eventReviewIssueFound",
+  score_changed: "eventScoreChanged",
+  directives_accepted: "eventDirectivesAccepted",
+  human_feedback_received: "eventHumanFeedbackReceived",
+  provenance_frozen: "eventProvenanceFrozen",
 };
 
 const navItems: Array<[TranslationKey, ComponentType<{ size?: number }>, boolean]> = [

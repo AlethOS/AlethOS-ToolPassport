@@ -7,6 +7,7 @@ export type RunStatus =
   | "cancelled";
 
 export type RunEventType =
+  // v0.1 lifecycle events
   | "run_created"
   | "run_status_changed"
   | "node_started"
@@ -17,7 +18,21 @@ export type RunEventType =
   | "approval_resolved"
   | "attestation_submitted"
   | "attestation_confirmed"
-  | "error";
+  | "error"
+  // v0.2 decision events
+  | "profile_selected"
+  | "hypothesis_created"
+  | "hypothesis_updated"
+  | "research_query_planned"
+  | "gap_detected"
+  | "evidence_linked"
+  | "claim_contradicted"
+  | "evidence_board_frozen"
+  | "review_issue_found"
+  | "score_changed"
+  | "directives_accepted"
+  | "human_feedback_received"
+  | "provenance_frozen";
 
 export interface ToolInput {
   name: string;
@@ -40,10 +55,14 @@ export interface Run {
 export interface RunEvent {
   event_id: string;
   run_id: string;
+  sequence: number;
   node_id: string;
   event_type: RunEventType;
   payload: Record<string, unknown>;
   created_at: string;
+  // v0.2 hash chain
+  event_hash: string;
+  prev_event_hash: string;
 }
 
 export interface RunListResponse {
