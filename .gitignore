@@ -10,6 +10,8 @@
 data/
 runs/*
 !runs/.gitkeep
+backend/runs/*
+!backend/runs/.gitkeep
 docs/devlog/
 
 # Rust

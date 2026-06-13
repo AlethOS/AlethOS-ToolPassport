@@ -1,21 +1,27 @@
 #!/usr/bin/env python
-"""Demonstration script for Stage 3 orchestrator investigation mock.
+"""Demonstration script for Stage 3 orchestrator investigation graph.
 
 Run from the repo root:
     PYTHONPATH=src python scripts/run_graph_demo.py
 
 Or via check_orchestrator.sh (which sets up the venv).
+
+Enable GLM-powered gap generation:
+    ORCHESTRATOR_USE_LLM=true python scripts/run_graph_demo.py
 """
 
 from __future__ import annotations
 
 import json
+import os
 
 from toolpassport_orchestrator import GraphState, build_graph
 from toolpassport_orchestrator.fixtures import MOCK_TOOL
 
 
 def main() -> None:
+    use_llm = os.environ.get("ORCHESTRATOR_USE_LLM", "").lower() in ("true", "1", "yes")
+
     initial = GraphState(
         run_id="00000000-0000-0000-0000-000000000001",
         goal="Audit LangGraph as an agent framework for long-horizon AI workflows",
@@ -26,14 +32,15 @@ def main() -> None:
         target_revision=MOCK_TOOL["target_revision"],
     )
 
-    print("=== ToolPassport Investigation Mock ===")
+    mode_label = "LLM (GLM)" if use_llm else "mock"
+    print(f"=== ToolPassport Investigation [{mode_label} mode] ===")
     print(f"tool_id       : {initial.tool_id}")
     print(f"goal          : {initial.goal}")
     print(f"directives    : {initial.audit_directives}")
     print(f"max_rounds    : {initial.research_budget.max_rounds}")
     print()
 
-    graph = build_graph()
+    graph = build_graph(use_llm=use_llm)
     result = GraphState.model_validate(graph.invoke(initial))
 
     print(f"phase              : {result.phase}")

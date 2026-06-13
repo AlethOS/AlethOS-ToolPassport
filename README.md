@@ -42,6 +42,10 @@ migrations on startup. The current Trust Core slice implements:
 - `GET /api/runs`
 - `GET /api/runs/:run_id`
 - `POST /api/runs/:run_id/events`
+- `POST /api/runs/:run_id/artifacts` — upload one bounded multipart artifact
+- `GET /api/runs/:run_id/artifacts`
+- `POST /api/runs/:run_id/evidence` — persist one normalized Evidence JSON object
+- `GET /api/runs/:run_id/evidence`
 - `POST /api/tools` — create a tool candidate
 - `GET /api/tools` — list all tools
 - `GET /api/tools/by-id?tool_id=...` — get tool by namespaced ID
@@ -78,6 +82,21 @@ canonical URL, name, and type as an immutable audit snapshot. A new
 `runs.tool_id` column (migration `0003`) ensures every new Run is anchored to
 a stable tool identity.
 
+Stage 3 provides a fully offline Pydantic/LangGraph investigation mock with
+Profile selection, bounded research rounds, Evidence Board and Gap Tracker
+state, stopping conditions, and Skeptic Review. It does not call real sources
+or persist its mock Evidence through the backend yet.
+
+Stage 4 adds strict Artifact and Evidence contracts plus Rust-owned storage.
+The Trust Core allocates IDs and internal storage keys, writes only beneath
+`ARTIFACT_ROOT`, computes `0x`-prefixed SHA-256 hashes over the exact stored
+bytes, and appends `artifact_created` / `evidence_created` events with metadata
+in the same SQLite transaction. User filenames remain display metadata and
+never become storage paths. Artifact uploads and normalized Evidence JSON are
+limited to `ARTIFACT_MAX_BYTES` bytes, which defaults to 1 MiB. Database
+failures remove the newly written file so metadata and storage do not silently
+diverge.
+
 The Dashboard now provides a responsive, bilingual Trust Control Desk built
 with Next.js, Tailwind CSS, TanStack Query, React Flow, and Lucide. It reads
 authoritative health, Run, and append-only Event data through read-only
@@ -88,7 +107,7 @@ not calculate scores or Hashes and exposes no approval or chain-write action.
 
 The minimal Foundry contract groups commitments by `toolId -> runId` and
 records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. The
-runtime Profile selector, orchestrator subprocess, SSE, evidence, artifacts,
+orchestrator subprocess, SSE, event hash chain, persisted check results,
 passports, approval records, and onchain writes are not implemented yet.
 
 Product scope and architecture are tracked in:

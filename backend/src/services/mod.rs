@@ -1,18 +1,22 @@
 use chrono::Utc;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, CreateRunRequest, CreateToolRequest,
-        ExternalIdentifier, ReasonCode, ResolutionResponse, ResolutionStatus, ResolveToolRequest,
-        Run, RunDetails, RunEvent, RunEventType, RunStatus, Tool, ToolInput,
+        AddIdentifierRequest, AppendRunEventRequest, Artifact, CreateArtifactRequest,
+        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, ExternalIdentifier,
+        ReasonCode, ResolutionResponse, ResolutionStatus, ResolveToolRequest, Run, RunDetails,
+        RunEvent, RunEventType, RunStatus, Tool, ToolInput,
     },
     repository::{Repository, RepositoryError},
 };
 
 mod normalizer;
+mod storage;
+
+pub use storage::{DEFAULT_MAX_STORED_BYTES, StorageError, StorageService};
 
 #[derive(Debug, Error)]
 pub enum ServiceError {
@@ -38,16 +42,22 @@ pub enum ServiceError {
     InvalidIntakeVersion,
     #[error(transparent)]
     Repository(#[from] RepositoryError),
+    #[error(transparent)]
+    Storage(#[from] StorageError),
 }
 
 #[derive(Clone)]
 pub struct TrustCoreService {
     repository: Repository,
+    storage: StorageService,
 }
 
 impl TrustCoreService {
-    pub const fn new(repository: Repository) -> Self {
-        Self { repository }
+    pub fn new(repository: Repository, storage: StorageService) -> Self {
+        Self {
+            repository,
+            storage,
+        }
     }
 
     pub async fn create_run(&self, request: CreateRunRequest) -> Result<Run, ServiceError> {
@@ -385,6 +395,145 @@ impl TrustCoreService {
                 other => ServiceError::Repository(other),
             })
     }
+
+    pub async fn create_artifact(
+        &self,
+        run_id: &str,
+        request: CreateArtifactRequest,
+        content: &[u8],
+    ) -> Result<Artifact, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        validate_artifact_request(&request, content)?;
+
+        let _ = self
+            .repository
+            .get_run(run_id)
+            .await?
+            .ok_or(ServiceError::RunNotFound)?;
+
+        let artifact_id = Uuid::new_v4();
+        let stored = self
+            .storage
+            .save_artifact(run_id, artifact_id, content)
+            .await?;
+        let artifact = Artifact {
+            artifact_schema_version: "0.1.0",
+            artifact_id,
+            run_id,
+            filename: request.filename,
+            content_type: request.content_type,
+            size_bytes: stored.size_bytes,
+            sha256_hash: stored.sha256_hash,
+            storage_key: stored.storage_key,
+            created_at: Utc::now(),
+        };
+        let event = generated_event(
+            run_id,
+            RunEventType::ArtifactCreated,
+            json!({
+                "artifact_id": artifact.artifact_id,
+                "sha256_hash": artifact.sha256_hash,
+                "size_bytes": artifact.size_bytes,
+            }),
+        );
+
+        match self.repository.create_artifact(&artifact, &event).await {
+            Ok(artifact) => Ok(artifact),
+            Err(error) => {
+                let _ = self.storage.remove_file(&artifact.storage_key).await;
+                Err(error.into())
+            }
+        }
+    }
+
+    pub async fn list_artifacts(&self, run_id: &str) -> Result<Vec<Artifact>, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        ensure_run_exists(&self.repository, run_id).await?;
+        self.repository
+            .list_artifacts(run_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn create_evidence(
+        &self,
+        run_id: &str,
+        request: CreateEvidenceRequest,
+    ) -> Result<Evidence, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        validate_evidence_request(&request)?;
+
+        ensure_run_exists(&self.repository, run_id).await?;
+        if let Some(artifact_id) = request.snapshot_artifact_id {
+            let artifact = self
+                .repository
+                .get_artifact(artifact_id)
+                .await?
+                .ok_or_else(|| {
+                    ServiceError::InvalidRequest(
+                        "snapshot_artifact_id must reference an artifact in this run".to_owned(),
+                    )
+                })?;
+            if artifact.run_id != run_id {
+                return Err(ServiceError::InvalidRequest(
+                    "snapshot_artifact_id must reference an artifact in this run".to_owned(),
+                ));
+            }
+        }
+
+        let evidence_id = Uuid::new_v4();
+        let content = serde_json::to_vec(&request)
+            .map_err(|error| ServiceError::InvalidRequest(error.to_string()))?;
+        let stored = self
+            .storage
+            .save_evidence(run_id, evidence_id, &content)
+            .await?;
+        let evidence = Evidence {
+            evidence_schema_version: "0.2.0",
+            evidence_id,
+            run_id,
+            source_type: request.source_type,
+            source_url: request.source_url,
+            source_revision: request.source_revision,
+            title: request.title,
+            excerpt: request.excerpt,
+            retrieved_at: request.retrieved_at,
+            snapshot_artifact_id: request.snapshot_artifact_id,
+            supports: request.supports,
+            contradicts: request.contradicts,
+            metadata: request.metadata,
+            size_bytes: stored.size_bytes,
+            content_hash: stored.sha256_hash,
+            storage_key: stored.storage_key,
+            created_at: Utc::now(),
+        };
+        let event = generated_event(
+            run_id,
+            RunEventType::EvidenceCreated,
+            json!({
+                "content_hash": evidence.content_hash,
+                "evidence_id": evidence.evidence_id,
+                "snapshot_artifact_id": evidence.snapshot_artifact_id,
+            }),
+        );
+
+        match self.repository.create_evidence(&evidence, &event).await {
+            Ok(evidence) => Ok(evidence),
+            Err(error) => {
+                let _ = self.storage.remove_file(&evidence.storage_key).await;
+                Err(error.into())
+            }
+        }
+    }
+
+    pub async fn list_evidence(&self, run_id: &str) -> Result<Vec<Evidence>, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        ensure_run_exists(&self.repository, run_id).await?;
+        self.repository
+            .list_evidence(run_id)
+            .await
+            .map_err(Into::into)
+    }
 }
 
 struct EventProjection {
@@ -496,6 +645,97 @@ fn ensure_status(current: RunStatus, allowed: &[RunStatus]) -> Result<(), Servic
 
 fn parse_run_id(run_id: &str) -> Result<Uuid, ServiceError> {
     Uuid::parse_str(run_id).map_err(|_| ServiceError::InvalidRunId)
+}
+
+async fn ensure_run_exists(repository: &Repository, run_id: Uuid) -> Result<(), ServiceError> {
+    repository
+        .get_run(run_id)
+        .await?
+        .ok_or(ServiceError::RunNotFound)?;
+    Ok(())
+}
+
+fn generated_event(run_id: Uuid, event_type: RunEventType, payload: Value) -> RunEvent {
+    RunEvent {
+        event_id: Uuid::new_v4(),
+        run_id,
+        sequence: 0,
+        node_id: "trust_core".to_owned(),
+        event_type,
+        payload: payload.as_object().cloned().unwrap_or_default(),
+        created_at: Utc::now(),
+    }
+}
+
+fn validate_artifact_request(
+    request: &CreateArtifactRequest,
+    content: &[u8],
+) -> Result<(), ServiceError> {
+    validate_required("filename", &request.filename, 255)?;
+    validate_required("content_type", &request.content_type, 255)?;
+    if request.filename.contains('/')
+        || request.filename.contains('\\')
+        || request.filename.contains("..")
+        || request.filename.chars().any(char::is_control)
+    {
+        return Err(ServiceError::InvalidRequest(
+            "filename must be a plain display name without path components".to_owned(),
+        ));
+    }
+    if content.is_empty() {
+        return Err(ServiceError::InvalidRequest(
+            "artifact content must not be empty".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_evidence_request(request: &CreateEvidenceRequest) -> Result<(), ServiceError> {
+    if request.evidence_schema_version != "0.2.0" {
+        return Err(ServiceError::InvalidRequest(
+            "evidence_schema_version must be 0.2.0".to_owned(),
+        ));
+    }
+    validate_required("source_url", &request.source_url, 2_048)?;
+    if request
+        .source_url
+        .strip_prefix("https://")
+        .is_none_or(|remainder| remainder.trim().is_empty())
+    {
+        return Err(ServiceError::InvalidRequest(
+            "source_url must use HTTPS".to_owned(),
+        ));
+    }
+    validate_required("title", &request.title, 500)?;
+    if request.excerpt.chars().count() > 20_000 {
+        return Err(ServiceError::InvalidRequest(
+            "excerpt must contain at most 20000 characters".to_owned(),
+        ));
+    }
+    if let Some(revision) = &request.source_revision {
+        validate_required("source_revision", revision, 500)?;
+    }
+    validate_reference_list("supports", &request.supports)?;
+    validate_reference_list("contradicts", &request.contradicts)?;
+    Ok(())
+}
+
+fn validate_reference_list(field: &str, values: &[String]) -> Result<(), ServiceError> {
+    if values.len() > 200 {
+        return Err(ServiceError::InvalidRequest(format!(
+            "{field} must contain at most 200 entries"
+        )));
+    }
+    let mut unique = std::collections::HashSet::new();
+    for value in values {
+        validate_required(field, value, 500)?;
+        if !unique.insert(value) {
+            return Err(ServiceError::InvalidRequest(format!(
+                "{field} entries must be unique"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_create_run(request: &CreateRunRequest) -> Result<(), ServiceError> {

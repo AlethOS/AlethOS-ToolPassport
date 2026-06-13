@@ -1,11 +1,14 @@
-"""Node functions for the ToolPassport investigation mock graph.
+"""Node functions for the ToolPassport investigation graph.
 
 Each node accepts the full GraphState and returns a dict of fields to update.
-All logic uses mock/fixture data — no GLM, network, or database calls.
+Most nodes use mock/fixture data; ``hypothesis_builder_llm`` optionally calls
+GLM via the LLM adapter for richer gap descriptions.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any, cast
 
 from .fixtures import (
@@ -14,7 +17,10 @@ from .fixtures import (
     make_mock_evidence,
     make_mock_gaps,
 )
+from .llm import LLMConfig, LLMError, chat_structured_list
 from .state import CheckFinding, GapEntry, GraphState, ResearchBudget
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -108,9 +114,81 @@ def audit_plan_builder(state: GraphState) -> dict[str, Any]:
 
 
 def hypothesis_builder(state: GraphState) -> dict[str, Any]:
-    """Generate initial Gap entries for every profile check."""
+    """Generate initial Gap entries for every profile check (mock)."""
     checks = _profile_checks(state)
     gaps = make_mock_gaps(checks, resolved_check_ids=set())
+    return {
+        "current_node": "hypothesis_builder",
+        "open_gaps": gaps,
+    }
+
+
+def hypothesis_builder_llm(state: GraphState) -> dict[str, Any]:
+    """Generate Gap entries using GLM; falls back to mock on failure."""
+    checks = _profile_checks(state)
+    config = LLMConfig()
+
+    if not config.is_configured:
+        logger.warning("LLM not configured, falling back to mock gaps")
+        return hypothesis_builder(state)
+
+    # Build a structured prompt from the profile checks
+    checks_desc = json.dumps(
+        [
+            {
+                "check_id": c["check_id"],
+                "dimension": c.get("dimension", ""),
+                "question": c.get("question", ""),
+                "high_risk": c.get("high_risk", False),
+                "required_evidence_types": c.get("required_evidence_types", []),
+            }
+            for c in checks
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    tool_ctx = ""
+    if state.tool_name:
+        tool_ctx += f"Tool: {state.tool_name}"
+    if state.tool_type:
+        tool_ctx += f" (type: {state.tool_type})"
+    if state.goal:
+        tool_ctx += f"\nAudit goal: {state.goal}"
+    if state.audit_directives:
+        tool_ctx += f"\nAudit directives: {state.audit_directives}"
+
+    system_prompt = (
+        "You are a security audit gap analyst. Given a list of audit checks "
+        "for a tool, generate a precise gap description for each check. "
+        "Each gap should explain what specific evidence or information needs "
+        "to be gathered to evaluate that check. Be concise but specific."
+    )
+    user_prompt = (
+        f"{tool_ctx}\n\n"
+        f"Audit checks to analyze:\n{checks_desc}\n\n"
+        "For each check, produce a GapEntry with:\n"
+        '- gap_id: "gap-{check_id}"\n'
+        "- check_id: the check's check_id\n"
+        "- description: a specific, actionable description of what evidence "
+        "is needed for this check (2-3 sentences)\n"
+        "- priority: \"high\" if high_risk is true, otherwise \"medium\"\n"
+        "- resolved: false"
+    )
+
+    try:
+        gaps = chat_structured_list(
+            config,
+            system_prompt,
+            user_prompt,
+            GapEntry,
+            temperature=0.3,
+        )
+        logger.info("GLM generated %d gap entries", len(gaps))
+    except LLMError as exc:
+        logger.warning("GLM call failed (%s), falling back to mock gaps", exc)
+        gaps = make_mock_gaps(checks, resolved_check_ids=set())
+
     return {
         "current_node": "hypothesis_builder",
         "open_gaps": gaps,

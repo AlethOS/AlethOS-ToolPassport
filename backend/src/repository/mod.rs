@@ -10,7 +10,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    ExternalIdentifier, Run, RunEvent, RunEventType, RunStatus, Tool, ToolInput, ToolType,
+    Artifact, Evidence, EvidenceSourceType, ExternalIdentifier, Run, RunEvent, RunEventType,
+    RunStatus, Tool, ToolInput, ToolType,
 };
 
 #[derive(Debug, Error)]
@@ -421,6 +422,139 @@ impl Repository {
         })
     }
 
+    pub async fn create_artifact(
+        &self,
+        artifact: &Artifact,
+        event: &RunEvent,
+    ) -> Result<Artifact, RepositoryError> {
+        let payload = serde_json::to_string(&event.payload).map_err(invalid_stored_data)?;
+        let mut transaction = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO artifacts (
+                artifact_id, run_id, filename, content_type, size_bytes, sha256_hash,
+                storage_key, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(artifact.artifact_id.to_string())
+        .bind(artifact.run_id.to_string())
+        .bind(&artifact.filename)
+        .bind(&artifact.content_type)
+        .bind(artifact.size_bytes)
+        .bind(&artifact.sha256_hash)
+        .bind(&artifact.storage_key)
+        .bind(format_timestamp(artifact.created_at))
+        .execute(&mut *transaction)
+        .await?;
+
+        insert_generated_event(&mut transaction, event, &payload).await?;
+        transaction.commit().await?;
+        Ok(artifact.clone())
+    }
+
+    pub async fn get_artifact(
+        &self,
+        artifact_id: Uuid,
+    ) -> Result<Option<Artifact>, RepositoryError> {
+        let row = sqlx::query_as::<_, ArtifactRow>(
+            r#"
+            SELECT artifact_id, run_id, filename, content_type, size_bytes, sha256_hash,
+                   storage_key, created_at
+            FROM artifacts
+            WHERE artifact_id = ?
+            "#,
+        )
+        .bind(artifact_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn list_artifacts(&self, run_id: Uuid) -> Result<Vec<Artifact>, RepositoryError> {
+        let rows = sqlx::query_as::<_, ArtifactRow>(
+            r#"
+            SELECT artifact_id, run_id, filename, content_type, size_bytes, sha256_hash,
+                   storage_key, created_at
+            FROM artifacts
+            WHERE run_id = ?
+            ORDER BY created_at ASC, artifact_id ASC
+            "#,
+        )
+        .bind(run_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    pub async fn create_evidence(
+        &self,
+        evidence: &Evidence,
+        event: &RunEvent,
+    ) -> Result<Evidence, RepositoryError> {
+        let supports = serde_json::to_string(&evidence.supports).map_err(invalid_stored_data)?;
+        let contradicts =
+            serde_json::to_string(&evidence.contradicts).map_err(invalid_stored_data)?;
+        let metadata = serde_json::to_string(&evidence.metadata).map_err(invalid_stored_data)?;
+        let payload = serde_json::to_string(&event.payload).map_err(invalid_stored_data)?;
+        let mut transaction = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO evidence (
+                evidence_id, run_id, source_type, source_url, source_revision, title, excerpt,
+                retrieved_at, snapshot_artifact_id, supports, contradicts, metadata, size_bytes,
+                content_hash, storage_key, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(evidence.evidence_id.to_string())
+        .bind(evidence.run_id.to_string())
+        .bind(evidence.source_type.as_str())
+        .bind(&evidence.source_url)
+        .bind(&evidence.source_revision)
+        .bind(&evidence.title)
+        .bind(&evidence.excerpt)
+        .bind(format_timestamp(evidence.retrieved_at))
+        .bind(evidence.snapshot_artifact_id.map(|id| id.to_string()))
+        .bind(supports)
+        .bind(contradicts)
+        .bind(metadata)
+        .bind(evidence.size_bytes)
+        .bind(&evidence.content_hash)
+        .bind(&evidence.storage_key)
+        .bind(format_timestamp(evidence.created_at))
+        .execute(&mut *transaction)
+        .await?;
+
+        insert_generated_event(&mut transaction, event, &payload).await?;
+        transaction.commit().await?;
+        Ok(evidence.clone())
+    }
+
+    pub async fn list_evidence(&self, run_id: Uuid) -> Result<Vec<Evidence>, RepositoryError> {
+        let rows = sqlx::query_as::<_, EvidenceRow>(
+            r#"
+            SELECT evidence_id, run_id, source_type, source_url, source_revision, title, excerpt,
+                   retrieved_at, snapshot_artifact_id, supports, contradicts, metadata, size_bytes,
+                   content_hash, storage_key, created_at
+            FROM evidence
+            WHERE run_id = ?
+            ORDER BY created_at ASC, evidence_id ASC
+            "#,
+        )
+        .bind(run_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
     async fn load_full_tool(&self, row: ToolRow) -> Result<Tool, RepositoryError> {
         let external_ids = sqlx::query_as::<_, ToolExternalIdRow>(
             r#"
@@ -622,4 +756,122 @@ impl TryFrom<ToolExternalIdRow> for ExternalIdentifier {
             canonical_url: row.canonical_url,
         })
     }
+}
+
+#[derive(Debug, FromRow)]
+struct ArtifactRow {
+    artifact_id: String,
+    run_id: String,
+    filename: String,
+    content_type: String,
+    size_bytes: i64,
+    sha256_hash: String,
+    storage_key: String,
+    created_at: String,
+}
+
+impl TryFrom<ArtifactRow> for Artifact {
+    type Error = RepositoryError;
+
+    fn try_from(row: ArtifactRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            artifact_schema_version: "0.1.0",
+            artifact_id: parse_uuid(&row.artifact_id)?,
+            run_id: parse_uuid(&row.run_id)?,
+            filename: row.filename,
+            content_type: row.content_type,
+            size_bytes: row.size_bytes,
+            sha256_hash: row.sha256_hash,
+            storage_key: row.storage_key,
+            created_at: parse_timestamp(&row.created_at)?,
+        })
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct EvidenceRow {
+    evidence_id: String,
+    run_id: String,
+    source_type: String,
+    source_url: String,
+    source_revision: Option<String>,
+    title: String,
+    excerpt: String,
+    retrieved_at: String,
+    snapshot_artifact_id: Option<String>,
+    supports: String,
+    contradicts: String,
+    metadata: String,
+    size_bytes: i64,
+    content_hash: String,
+    storage_key: String,
+    created_at: String,
+}
+
+impl TryFrom<EvidenceRow> for Evidence {
+    type Error = RepositoryError;
+
+    fn try_from(row: EvidenceRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            evidence_schema_version: "0.2.0",
+            evidence_id: parse_uuid(&row.evidence_id)?,
+            run_id: parse_uuid(&row.run_id)?,
+            source_type: EvidenceSourceType::parse(&row.source_type).ok_or_else(|| {
+                RepositoryError::InvalidStoredData(format!(
+                    "unknown evidence source type: {}",
+                    row.source_type
+                ))
+            })?,
+            source_url: row.source_url,
+            source_revision: row.source_revision,
+            title: row.title,
+            excerpt: row.excerpt,
+            retrieved_at: parse_timestamp(&row.retrieved_at)?,
+            snapshot_artifact_id: row
+                .snapshot_artifact_id
+                .map(|value| parse_uuid(&value))
+                .transpose()?,
+            supports: serde_json::from_str(&row.supports).map_err(invalid_stored_data)?,
+            contradicts: serde_json::from_str(&row.contradicts).map_err(invalid_stored_data)?,
+            metadata: serde_json::from_str(&row.metadata).map_err(invalid_stored_data)?,
+            size_bytes: row.size_bytes,
+            content_hash: row.content_hash,
+            storage_key: row.storage_key,
+            created_at: parse_timestamp(&row.created_at)?,
+        })
+    }
+}
+
+async fn insert_generated_event(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    event: &RunEvent,
+    payload: &str,
+) -> Result<(), RepositoryError> {
+    sqlx::query(
+        r#"
+        INSERT INTO run_events (
+            event_id, run_id, sequence, node_id, event_type, payload, created_at
+        )
+        SELECT ?, ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ?
+        FROM run_events
+        WHERE run_id = ?
+        "#,
+    )
+    .bind(event.event_id.to_string())
+    .bind(event.run_id.to_string())
+    .bind(&event.node_id)
+    .bind(event.event_type.as_str())
+    .bind(payload)
+    .bind(format_timestamp(event.created_at))
+    .bind(event.run_id.to_string())
+    .execute(&mut **transaction)
+    .await?;
+
+    sqlx::query("UPDATE runs SET updated_at = ? WHERE run_id = ?")
+        .bind(format_timestamp(event.created_at))
+        .bind(event.run_id.to_string())
+        .execute(&mut **transaction)
+        .await?;
+
+    Ok(())
 }
