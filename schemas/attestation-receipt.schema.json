@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/attestation-receipt.schema.json",
+  "title": "Attestation Receipt",
+  "description": "Independent testnet receipt that never mutates a frozen Passport.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "attestation_receipt_schema_version",
+    "attestation_id",
+    "run_id",
+    "tool_id",
+    "passport_hash",
+    "audit_log_hash",
+    "evidence_manifest_hash",
+    "onchain_run_id",
+    "chain_id",
+    "registry_contract",
+    "status",
+    "transaction_hash",
+    "submitted_at",
+    "confirmed_at"
+  ],
+  "properties": {
+    "attestation_receipt_schema_version": {
+      "const": "0.1.0"
+    },
+    "attestation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tool_id": {
+      "type": "string",
+      "pattern": "^(github|url):[^\\s]+$"
+    },
+    "passport_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "audit_log_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "evidence_manifest_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "onchain_run_id": {
+      "$ref": "#/$defs/sha256"
+    },
+    "chain_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "registry_contract": {
+      "$ref": "#/$defs/address"
+    },
+    "status": {
+      "enum": [
+        "submitted",
+        "confirmed",
+        "failed"
+      ]
+    },
+    "transaction_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "confirmed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    }
+  }
+}

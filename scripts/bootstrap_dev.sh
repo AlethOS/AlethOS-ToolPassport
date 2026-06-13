@@ -42,6 +42,9 @@ fi
   -r "$ROOT/orchestrator/requirements-dev.lock"
 "$ROOT/orchestrator/.venv/bin/python" -m pip install \
   "${python_index_args[@]}" \
+  -r "$ROOT/schemas/requirements.lock"
+"$ROOT/orchestrator/.venv/bin/python" -m pip install \
+  "${python_index_args[@]}" \
   --no-deps \
   -e "$ROOT/orchestrator"
 
