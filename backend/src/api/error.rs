@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::rejection::JsonRejection,
+    extract::{multipart::MultipartError, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -31,6 +31,15 @@ impl ApiError {
             "invalid_json",
             "request body must be valid JSON matching the expected shape",
             json!({ "reason": rejection.body_text() }),
+        )
+    }
+
+    pub fn invalid_multipart(error: MultipartError) -> Self {
+        Self::new(
+            error.status(),
+            "invalid_multipart",
+            "request body must contain one valid multipart file field",
+            json!({}),
         )
     }
 
@@ -117,6 +126,27 @@ impl From<ServiceError> for ApiError {
                 "an internal error occurred",
                 json!({}),
             ),
+            ServiceError::Storage(err) => match err {
+                crate::services::StorageError::TooLarge { .. } => Self::new(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "stored_content_too_large",
+                    err.to_string(),
+                    json!({}),
+                ),
+                crate::services::StorageError::InvalidStorageKey
+                | crate::services::StorageError::PathTraversal => Self::new(
+                    StatusCode::BAD_REQUEST,
+                    "storage_error",
+                    err.to_string(),
+                    json!({}),
+                ),
+                crate::services::StorageError::Io(_) => Self::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                    "an internal error occurred",
+                    json!({}),
+                ),
+            },
         }
     }
 }

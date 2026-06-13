@@ -2,7 +2,8 @@ mod error;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State, rejection::JsonRejection},
+    extract::DefaultBodyLimit,
+    extract::{Multipart, Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     routing::{get, post},
 };
@@ -11,11 +12,12 @@ use sqlx::SqlitePool;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, CreateRunRequest, CreateToolRequest,
-        ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
+        AddIdentifierRequest, AppendRunEventRequest, Artifact, CreateArtifactRequest,
+        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, ResolveToolRequest,
+        Run, RunDetails, RunEvent, Tool,
     },
     repository::Repository,
-    services::TrustCoreService,
+    services::{DEFAULT_MAX_STORED_BYTES, ServiceError, StorageService, TrustCoreService},
 };
 
 use self::error::{ApiError, ApiResult};
@@ -41,14 +43,32 @@ struct ToolListResponse {
     tools: Vec<Tool>,
 }
 
+#[derive(Debug, Serialize)]
+struct ArtifactListResponse {
+    artifacts: Vec<Artifact>,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceListResponse {
+    evidence: Vec<Evidence>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ToolQueryParams {
     tool_id: String,
 }
 
 pub fn app(pool: SqlitePool) -> Router {
+    app_with_storage(
+        pool,
+        StorageService::new("../runs", DEFAULT_MAX_STORED_BYTES),
+    )
+}
+
+pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
+    let body_limit = storage.max_bytes() + 64 * 1024;
     let state = AppState {
-        service: TrustCoreService::new(Repository::new(pool)),
+        service: TrustCoreService::new(Repository::new(pool), storage),
     };
 
     Router::new()
@@ -56,12 +76,21 @@ pub fn app(pool: SqlitePool) -> Router {
         .route("/api/runs", post(create_run).get(list_runs))
         .route("/api/runs/{run_id}", get(get_run))
         .route("/api/runs/{run_id}/events", post(append_event))
+        .route(
+            "/api/runs/{run_id}/artifacts",
+            post(upload_artifact).get(list_artifacts),
+        )
+        .route(
+            "/api/runs/{run_id}/evidence",
+            post(upload_evidence).get(list_evidence),
+        )
         .route("/api/tools", post(create_tool).get(list_tools))
         .route("/api/tools/by-id", get(get_tool_by_query))
         .route("/api/tools/resolve", post(resolve_tool))
         .route("/api/tools/identifiers", post(add_identifier))
         .fallback(error::not_found)
         .method_not_allowed_fallback(error::method_not_allowed)
+        .layer(DefaultBodyLimit::max(body_limit))
         .with_state(state)
 }
 
@@ -146,4 +175,74 @@ async fn add_identifier(
         .add_identifier(&params.tool_id, request)
         .await?;
     Ok(Json(tool))
+}
+
+async fn upload_artifact(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    mut multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<Artifact>)> {
+    let mut filename = None;
+    let mut content_type = None;
+    let mut data = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(ApiError::invalid_multipart)?
+    {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "file" {
+            filename = field.file_name().map(|s| s.to_string());
+            content_type = field.content_type().map(|s| s.to_string());
+            data = Some(field.bytes().await.map_err(ApiError::invalid_multipart)?);
+        }
+    }
+
+    let filename =
+        filename.ok_or_else(|| ServiceError::InvalidRequest("file is required".into()))?;
+    let content_type = content_type.unwrap_or_else(|| "application/octet-stream".into());
+    let data =
+        data.ok_or_else(|| ServiceError::InvalidRequest("file content is required".into()))?;
+
+    let artifact = state
+        .service
+        .create_artifact(
+            &run_id,
+            CreateArtifactRequest {
+                filename,
+                content_type,
+            },
+            &data,
+        )
+        .await?;
+
+    Ok((StatusCode::CREATED, Json(artifact)))
+}
+
+async fn list_artifacts(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<ArtifactListResponse>> {
+    let artifacts = state.service.list_artifacts(&run_id).await?;
+    Ok(Json(ArtifactListResponse { artifacts }))
+}
+
+async fn upload_evidence(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<CreateEvidenceRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<Evidence>)> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let evidence = state.service.create_evidence(&run_id, request).await?;
+
+    Ok((StatusCode::CREATED, Json(evidence)))
+}
+
+async fn list_evidence(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<EvidenceListResponse>> {
+    let evidence = state.service.list_evidence(&run_id).await?;
+    Ok(Json(EvidenceListResponse { evidence }))
 }

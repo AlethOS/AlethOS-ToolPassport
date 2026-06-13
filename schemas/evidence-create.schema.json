@@ -1,13 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://alethos.local/schemas/evidence.schema.json",
-  "title": "Stored Evidence",
+  "$id": "https://alethos.local/schemas/evidence-create.schema.json",
+  "title": "Create Evidence Request",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "evidence_schema_version",
-    "evidence_id",
-    "run_id",
     "source_type",
     "source_url",
     "source_revision",
@@ -17,25 +15,21 @@
     "snapshot_artifact_id",
     "supports",
     "contradicts",
-    "metadata",
-    "size_bytes",
-    "content_hash",
-    "created_at"
+    "metadata"
   ],
   "properties": {
     "evidence_schema_version": {
       "const": "0.2.0"
     },
-    "evidence_id": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "run_id": {
-      "type": "string",
-      "format": "uuid"
-    },
     "source_type": {
-      "$ref": "#/$defs/source_type"
+      "enum": [
+        "user_material",
+        "official_website",
+        "official_docs",
+        "github_readme",
+        "github_metadata",
+        "public_example"
+      ]
     },
     "source_url": {
       "type": "string",
@@ -67,28 +61,6 @@
       "format": "uuid"
     },
     "supports": {
-      "$ref": "#/$defs/references"
-    },
-    "contradicts": {
-      "$ref": "#/$defs/references"
-    },
-    "metadata": {
-      "type": "object"
-    },
-    "size_bytes": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "content_hash": {
-      "$ref": "#/$defs/sha256"
-    },
-    "created_at": {
-      "type": "string",
-      "format": "date-time"
-    }
-  },
-  "$defs": {
-    "references": {
       "type": "array",
       "uniqueItems": true,
       "items": {
@@ -96,19 +68,16 @@
         "minLength": 1
       }
     },
-    "sha256": {
-      "type": "string",
-      "pattern": "^0x[0-9a-f]{64}$"
+    "contradicts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
-    "source_type": {
-      "enum": [
-        "user_material",
-        "official_website",
-        "official_docs",
-        "github_readme",
-        "github_metadata",
-        "public_example"
-      ]
+    "metadata": {
+      "type": "object"
     }
   }
 }

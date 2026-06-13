@@ -15,4 +15,5 @@ command -v npm >/dev/null 2>&1 || {
 
 cd "$ROOT/dashboard"
 npm run lint
+npm test
 npm run build

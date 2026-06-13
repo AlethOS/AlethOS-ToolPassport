@@ -4,11 +4,14 @@
 !.env.example
 .codex/
 .agents/
+.vscode/
 
 # Local data and generated artifacts
 data/
 runs/*
 !runs/.gitkeep
+backend/runs/*
+!backend/runs/.gitkeep
 docs/devlog/
 
 # Rust
@@ -29,6 +32,7 @@ node_modules/
 .next/
 out/
 coverage/
+*.tsbuildinfo
 
 # Foundry
 contracts/cache/
