@@ -83,6 +83,10 @@ address, deployed-code presence, and issues. It never returns the RPC URL or
 private key and never signs or broadcasts. The approved Registry must match the
 runtime `REGISTRY_CONTRACT`.
 
+Container deployments must include system CA certificates because Alloy uses
+HTTPS RPC endpoints during preflight and submission. The repository runtime
+image installs Debian `ca-certificates`.
+
 ## GitHub Actions Boundary
 
 The normal CI workflow does not need or receive testnet secrets. Any future
