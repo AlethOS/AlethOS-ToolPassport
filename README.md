@@ -189,6 +189,26 @@ prohibited.
 schema, and Markdown checks on every push and pull request. After the first
 push, protect `main` and require all CI jobs before merging.
 
-Deployment is intentionally not automated yet. Any future CD workflow must use
-a protected GitHub environment and retain explicit human approval for wallet
-signing, contract deployment, or onchain writes.
+## Application Deployment
+
+`.github/workflows/deploy.yml` deploys the application to an existing remote
+Git checkout over SSH. It checks out the requested ref in detached-HEAD mode
+and then runs `scripts/deploy.sh`, which checks and builds that exact revision
+before restarting the configured backend systemd service and Dashboard PM2
+process. The deploy script does not pull code, deploy contracts, sign, or write
+onchain.
+
+Configure the protected `aliyun-ecs` GitHub environment with these secrets:
+
+- `DEPLOY_HOST`: remote SSH host
+- `DEPLOY_USER`: remote SSH user
+- `DEPLOY_KEY`: remote SSH private key
+- `DEPLOY_PATH`: absolute path of the existing remote Git checkout
+
+The workflow can always be started manually with a branch, tag, or commit. To
+also trigger it after a successful `main` CI run, set the repository variable
+`AUTO_DEPLOY` to `true`. Keep required reviewers on the `aliyun-ecs`
+environment when application releases need explicit authorization. This
+workflow never performs wallet signing, contract deployment, or onchain writes;
+those operations require a separate protected workflow and explicit human
+approval.

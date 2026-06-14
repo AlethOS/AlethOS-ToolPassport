@@ -2,6 +2,19 @@ name: Deploy to Aliyun ECS
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Git branch, tag, or commit to deploy
+        required: true
+        default: main
+        type: string
+  workflow_run:
+    workflows:
+      - CI
+    branches:
+      - main
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -12,9 +25,16 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      vars.AUTO_DEPLOY == 'true')
     runs-on: ubuntu-latest
     environment: aliyun-ecs
     timeout-minutes: 20
+    env:
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_REF: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref }}
     steps:
       - name: Execute remote ssh commands
         uses: appleboy/ssh-action@v1.0.3
@@ -22,12 +42,23 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
+          envs: DEPLOY_PATH,DEPLOY_REF
+          script_stop: true
           script: |
-            PROJECT_ROOT="/root/AlethOS-ToolPassport"
-            if [ ! -d "$PROJECT_ROOT" ]; then
-              echo "Project directory not found. Please clone the repository first."
+            if [ -z "$DEPLOY_PATH" ]; then
+              echo "DEPLOY_PATH is required."
               exit 1
             fi
-            cd "$PROJECT_ROOT"
+            if [ -z "$DEPLOY_REF" ]; then
+              echo "DEPLOY_REF is required."
+              exit 1
+            fi
+            if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              echo "Git project directory not found at DEPLOY_PATH."
+              exit 1
+            fi
+            cd "$DEPLOY_PATH"
+            git fetch --prune origin "$DEPLOY_REF"
+            git checkout --detach FETCH_HEAD
             chmod +x scripts/deploy.sh
             ./scripts/deploy.sh
