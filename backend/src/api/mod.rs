@@ -5,10 +5,15 @@ use axum::{
     extract::DefaultBodyLimit,
     extract::{Multipart, Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
+    response::sse::{Event, KeepAlive, Sse},
     routing::{get, post},
 };
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
+use std::convert::Infallible;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
     domain::{
@@ -19,7 +24,9 @@ use crate::{
         Tool,
     },
     repository::Repository,
-    services::{DEFAULT_MAX_STORED_BYTES, ServiceError, StorageService, TrustCoreService},
+    services::{
+        DEFAULT_MAX_STORED_BYTES, EventBroadcaster, ServiceError, StorageService, TrustCoreService,
+    },
 };
 
 use self::error::{ApiError, ApiResult};
@@ -55,6 +62,11 @@ struct EvidenceListResponse {
     evidence: Vec<Evidence>,
 }
 
+#[derive(Debug, Serialize)]
+struct EventListResponse {
+    events: Vec<RunEvent>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ToolQueryParams {
     tool_id: String,
@@ -69,18 +81,23 @@ pub fn app(pool: SqlitePool) -> Router {
 
 pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
     let body_limit = storage.max_bytes() + 64 * 1024;
+    let broadcaster = EventBroadcaster::new();
     let state = AppState {
-        service: TrustCoreService::new(Repository::new(pool), storage),
+        service: TrustCoreService::new(Repository::new(pool), storage, broadcaster),
     };
 
     Router::new()
         .route("/health", get(health))
         .route("/api/runs", post(create_run).get(list_runs))
         .route("/api/runs/{run_id}", get(get_run))
-        .route("/api/runs/{run_id}/events", post(append_event))
+        .route(
+            "/api/runs/{run_id}/events",
+            post(append_event).get(list_run_events),
+        )
+        .route("/api/runs/{run_id}/events/stream", get(stream_run_events))
         .route(
             "/api/runs/{run_id}/check-results",
-            post(create_check_results),
+            post(create_check_results).get(get_latest_check_results),
         )
         .route(
             "/api/runs/{run_id}/evidence-board/freeze",
@@ -316,4 +333,61 @@ async fn list_evidence(
 ) -> ApiResult<Json<EvidenceListResponse>> {
     let evidence = state.service.list_evidence(&run_id).await?;
     Ok(Json(EvidenceListResponse { evidence }))
+}
+
+/// GET /api/runs/{run_id}/events
+/// Returns all events for a run as a JSON array.
+async fn list_run_events(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<EventListResponse>> {
+    let events = state.service.list_events_for_run(&run_id).await?;
+    Ok(Json(EventListResponse { events }))
+}
+
+/// GET /api/runs/{run_id}/events/stream
+/// Server-Sent Events stream that pushes new events as they are appended.
+async fn stream_run_events(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let run_id = uuid::Uuid::parse_str(&run_id).map_err(|_| ServiceError::InvalidRunId)?;
+
+    // Ensure the run exists before opening the stream.
+    let _ = state.service.get_run_details(&run_id.to_string()).await?;
+
+    let rx = state.service.broadcaster().subscribe(run_id);
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok(event_json) => Some(Ok(Event::default().data(event_json).event("run_event"))),
+        Err(_lagged) => {
+            // If the receiver lagged behind, signal to the client.
+            Some(Ok(Event::default().event("lagged").data(
+                "{\"message\":\"event stream lagged; some events may have been missed\"}",
+            )))
+        }
+    });
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
+}
+
+/// GET /api/runs/{run_id}/check-results
+/// Returns the latest check results for a run (the one with the highest
+/// evidence_board_version) or 404 if none have been computed yet.
+async fn get_latest_check_results(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<CheckResults>> {
+    match state.service.get_latest_check_results(&run_id).await? {
+        Some(results) => Ok(Json(results)),
+        None => Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "check_results_not_found",
+            "no check results have been computed for this run",
+            serde_json::json!({}),
+        )),
+    }
 }

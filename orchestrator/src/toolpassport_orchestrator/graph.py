@@ -50,12 +50,15 @@ def _should_continue(state: GraphState) -> str:
     return "freeze_evidence_board"
 
 
-def build_graph(*, use_llm: bool = False) -> Any:  # CompiledStateGraph[GraphState, ...]
+def build_graph(*, use_llm: bool = False, checkpointer: Any = None) -> Any:
     """Compile the investigation graph.
 
     When *use_llm* is true (or ``ORCHESTRATOR_USE_LLM=true`` in the
     environment), ``hypothesis_builder`` calls GLM for gap descriptions.
     Otherwise it uses deterministic mock data.
+
+    When *checkpointer* is provided (e.g. a ``langgraph.checkpoint.sqlite.SqliteSaver``),
+    the graph state is persisted after each node, enabling interrupt/resume.
     """
     env_llm = os.environ.get("ORCHESTRATOR_USE_LLM", "").lower() in ("true", "1", "yes")
     effective_llm = use_llm or env_llm
@@ -103,4 +106,4 @@ def build_graph(*, use_llm: bool = False) -> Any:  # CompiledStateGraph[GraphSta
     builder.add_edge("skeptic_review", "passport_draft")
     builder.add_edge("passport_draft", END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

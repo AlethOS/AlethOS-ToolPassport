@@ -121,3 +121,233 @@ export interface PreviewPassportResult {
 
 export type DashboardTab = "overview" | "findings" | "evidence" | "execution" | "provenance";
 export type Locale = "en" | "zh-CN";
+
+// ── Stage 4: Evidence / Artifact ────────────────────────────────────
+
+export interface Artifact {
+  artifact_schema_version: string;
+  artifact_id: string;
+  run_id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  sha256_hash: string;
+  storage_key: string;
+  created_at: string;
+}
+
+export interface ArtifactListResponse {
+  artifacts: Artifact[];
+}
+
+export interface Evidence {
+  evidence_schema_version: string;
+  evidence_id: string;
+  run_id: string;
+  source_type: string;
+  source_url: string;
+  source_revision: string | null;
+  title: string;
+  excerpt: string;
+  retrieved_at: string;
+  snapshot_artifact_id: string | null;
+  supports: string[];
+  contradicts: string[];
+  metadata: Record<string, unknown>;
+  size_bytes: number;
+  content_hash: string;
+  storage_key: string;
+  created_at: string;
+}
+
+export interface EvidenceListResponse {
+  evidence: Evidence[];
+}
+
+// ── Stage 6: Check Results ──────────────────────────────────────────
+
+export interface Finding {
+  check_id: string;
+  finding: "pass" | "partial" | "fail" | "unknown" | "not_applicable";
+  rationale: string;
+  evidence_ids: string[];
+  not_applicable_reason: string | null;
+}
+
+export interface DimensionScore {
+  dimension_id: string;
+  score: number;
+  applicable_check_count: number;
+  weighted_points: number;
+  max_weighted_points: number;
+}
+
+export interface DimensionScores {
+  capability_clarity: DimensionScore;
+  interface_openness: DimensionScore;
+  automation_readiness: DimensionScore;
+  data_portability: DimensionScore;
+  permission_risk: DimensionScore;
+  evidence_quality: DimensionScore;
+  ecosystem_fit: DimensionScore;
+}
+
+export type Rating =
+  | "not_recommended"
+  | "manual_only"
+  | "trial"
+  | "low_risk"
+  | "core_candidate";
+
+export interface CheckResults {
+  check_results_schema_version: string;
+  check_results_id: string;
+  run_id: string;
+  evidence_board_version: number;
+  standard_id: string;
+  standard_version: string;
+  profile_id: string;
+  profile_version: string;
+  results: Finding[];
+  dimension_scores: DimensionScores;
+  total_score: number;
+  rating: Rating;
+  created_at: string;
+}
+
+// ── Stage 6: Frozen Evidence Board / Manifest ───────────────────────
+
+export interface EvidenceBoardClaim {
+  claim_id: string;
+  check_id: string;
+  statement: string;
+  confidence: number;
+  supports: string[];
+  contradicts: string[];
+}
+
+export interface EvidenceBoardGap {
+  gap_id: string;
+  check_id: string;
+  description: string;
+  priority: "high" | "medium" | "low";
+  status: "open" | "resolved" | "accepted";
+  resolution: string | null;
+}
+
+export interface FrozenEvidenceBoard {
+  evidence_board_schema_version: string;
+  run_id: string;
+  version: number;
+  standard_id: string;
+  standard_version: string;
+  profile_id: string;
+  profile_version: string;
+  evidence_ids: string[];
+  claims: EvidenceBoardClaim[];
+  gaps: EvidenceBoardGap[];
+  freeze_reason: string;
+  frozen_at: string;
+}
+
+export interface EvidenceManifestEntry {
+  evidence_id: string;
+  content_hash: string;
+  snapshot_artifact_id: string | null;
+  snapshot_hash: string | null;
+}
+
+export interface FrozenEvidenceManifest {
+  evidence_manifest_schema_version: string;
+  run_id: string;
+  evidence_board_version: number;
+  entries: EvidenceManifestEntry[];
+}
+
+export interface EvidenceFreezeResult {
+  evidence_board: FrozenEvidenceBoard;
+  evidence_manifest: FrozenEvidenceManifest;
+}
+
+// ── Stage 6: Passport / Provenance ──────────────────────────────────
+
+export interface PassportStatement {
+  statement_id: string;
+  statement: string;
+  evidence_ids: string[];
+}
+
+export interface PassportRisk {
+  risk_id: string;
+  title: string;
+  description: string;
+  evidence_ids: string[];
+  mitigation: string | null;
+}
+
+export interface PassportDimensionScores {
+  capability_clarity: number;
+  interface_openness: number;
+  automation_readiness: number;
+  data_portability: number;
+  permission_risk: number;
+  evidence_quality: number;
+  ecosystem_fit: number;
+}
+
+export interface PassportScores {
+  dimensions: PassportDimensionScores;
+  total_score: number;
+  rating: Rating;
+}
+
+export interface Recommendation {
+  summary: string;
+  conditions: string[];
+}
+
+export interface Passport {
+  passport_version: string;
+  passport_sequence: number;
+  tool_id: string;
+  run_id: string;
+  tool_type: string;
+  target_revision: string | null;
+  audit_scope: string;
+  standard_id: string;
+  standard_version: string;
+  profile_id: string;
+  profile_version: string;
+  evidence_board_version: number;
+  check_results_id: string;
+  capability_claims: PassportStatement[];
+  interfaces: PassportStatement[];
+  risks: PassportRisk[];
+  known_gaps: string[];
+  scores: PassportScores;
+  recommendation: Recommendation;
+}
+
+export interface Provenance {
+  provenance_schema_version: string;
+  run_id: string;
+  freeze_version: number;
+  evidence_board_version: number;
+  passport_sequence: number;
+  passport_hash: string;
+  audit_log_hash: string;
+  evidence_manifest_hash: string;
+  onchain_run_id: string;
+  frozen_at: string;
+}
+
+export interface PassportFreezeResult {
+  passport: Passport;
+  provenance: Provenance;
+}
+
+// ── Events list ─────────────────────────────────────────────────────
+
+export interface EventListResponse {
+  events: RunEvent[];
+}

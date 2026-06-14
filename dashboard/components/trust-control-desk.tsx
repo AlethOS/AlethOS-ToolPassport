@@ -35,10 +35,26 @@ import {
 import { useEffect, useMemo, useState, type ComponentType, type CSSProperties } from "react";
 
 import { ExecutionFlow, ProvenanceFlow } from "@/components/flow-panels";
-import { getHealth, getRunDetails, getRuns } from "@/lib/api";
+import {
+  getEvidenceBoard,
+  getHealth,
+  getRunCheckResults,
+  getRunDetails,
+  getPassport,
+  getRuns,
+} from "@/lib/api";
 import { translate, type TranslationKey } from "@/lib/i18n";
 import { evidenceClaims, evidenceCoverage, previewPassport } from "@/lib/preview";
-import type { DashboardTab, Locale, Run, RunEvent, RunStatus } from "@/lib/types";
+import type {
+  CheckResults,
+  DashboardTab,
+  EvidenceFreezeResult,
+  Locale,
+  PassportFreezeResult,
+  Run,
+  RunEvent,
+  RunStatus,
+} from "@/lib/types";
 
 const tabs: DashboardTab[] = ["overview", "findings", "evidence", "execution", "provenance"];
 const statuses: Array<"all" | RunStatus> = ["all", "pending", "running", "waiting_approval", "success", "failed", "cancelled"];
@@ -121,6 +137,43 @@ export function TrustControlDesk() {
   const selectedRun = detailsQuery.data?.run ?? runs.find((run) => run.run_id === activeRunId) ?? null;
   const events = detailsQuery.data?.events ?? [];
 
+  // Derive frozen board version and passport sequence from events.
+  const frozenBoardVersion = useMemo(() => {
+    const freezeEvent = events.find((e) => e.event_type === "evidence_board_frozen");
+    if (!freezeEvent) return null;
+    return (freezeEvent.payload as { evidence_board_version?: number }).evidence_board_version ?? null;
+  }, [events]);
+
+  const passportSequence = useMemo(() => {
+    const provEvent = events.find((e) => e.event_type === "provenance_frozen");
+    if (!provEvent) return null;
+    const seq = (provEvent.payload as { passport_sequence?: number }).passport_sequence;
+    return seq ?? null;
+  }, [events]);
+
+  // Fetch frozen artifacts when a board version and/or passport sequence is known.
+  const checkResultsQuery = useQuery({
+    queryKey: ["check-results", activeRunId],
+    queryFn: () => getRunCheckResults(activeRunId!),
+    enabled: Boolean(activeRunId),
+    refetchInterval: refreshInterval,
+  });
+  const checkResults: CheckResults | null = checkResultsQuery.data ?? null;
+
+  const evidenceFreezeQuery = useQuery({
+    queryKey: ["evidence-board", activeRunId, frozenBoardVersion],
+    queryFn: () => getEvidenceBoard(activeRunId!, frozenBoardVersion!),
+    enabled: Boolean(activeRunId && frozenBoardVersion),
+  });
+  const evidenceFreeze: EvidenceFreezeResult | null = evidenceFreezeQuery.data ?? null;
+
+  const passportQuery = useQuery({
+    queryKey: ["passport", activeRunId, passportSequence],
+    queryFn: () => getPassport(activeRunId!, passportSequence!),
+    enabled: Boolean(activeRunId && passportSequence),
+  });
+  const passportFreeze: PassportFreezeResult | null = passportQuery.data ?? null;
+
   const filteredRuns = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return runs.filter((run) => {
@@ -188,6 +241,9 @@ export function TrustControlDesk() {
               currentNode={selectedRun?.current_node ?? null}
               copiedHash={copiedHash}
               copyHash={copyHash}
+              checkResults={checkResults}
+              evidenceFreeze={evidenceFreeze}
+              passportFreeze={passportFreeze}
             />
             <TrustInspector
               t={t}
@@ -384,6 +440,9 @@ function ResultWorkspace({
   currentNode,
   copiedHash,
   copyHash,
+  checkResults,
+  evidenceFreeze,
+  passportFreeze,
 }: {
   t: (key: TranslationKey) => string;
   selectedRun: Run | null;
@@ -392,7 +451,12 @@ function ResultWorkspace({
   currentNode: string | null;
   copiedHash: string | null;
   copyHash: (hash: string) => Promise<void>;
+  checkResults: CheckResults | null;
+  evidenceFreeze: EvidenceFreezeResult | null;
+  passportFreeze: PassportFreezeResult | null;
 }) {
+  const hasRealData = Boolean(checkResults || evidenceFreeze || passportFreeze);
+
   return (
     <section className="panel result-workspace">
       <header className="result-header">
@@ -407,11 +471,22 @@ function ResultWorkspace({
           <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{t(item)}</button>
         ))}
       </nav>
-      <div className="preview-banner"><Zap size={15} /><strong>{t("preview")}</strong><span>{t("previewDataNotice")}</span></div>
+      {!hasRealData && (
+        <div className="preview-banner"><Zap size={15} /><strong>{t("preview")}</strong><span>{t("previewDataNotice")}</span></div>
+      )}
       <div className="result-content">
-        {tab === "overview" && <Overview t={t} copiedHash={copiedHash} copyHash={copyHash} setTab={setTab} />}
-        {tab === "findings" && <Findings t={t} />}
-        {tab === "evidence" && <Evidence t={t} />}
+        {tab === "overview" && (
+          <Overview
+            t={t}
+            copiedHash={copiedHash}
+            copyHash={copyHash}
+            setTab={setTab}
+            checkResults={checkResults}
+            passportFreeze={passportFreeze}
+          />
+        )}
+        {tab === "findings" && <Findings t={t} checkResults={checkResults} />}
+        {tab === "evidence" && <Evidence t={t} evidenceFreeze={evidenceFreeze} />}
         {tab === "execution" && <ExecutionFlow currentNode={currentNode} t={t} />}
         {tab === "provenance" && <ProvenanceFlow t={t} />}
       </div>
@@ -424,21 +499,49 @@ function Overview({
   copiedHash,
   copyHash,
   setTab,
+  checkResults,
+  passportFreeze,
 }: {
   t: (key: TranslationKey) => string;
   copiedHash: string | null;
   copyHash: (hash: string) => Promise<void>;
   setTab: (tab: DashboardTab) => void;
+  checkResults: CheckResults | null;
+  passportFreeze: PassportFreezeResult | null;
 }) {
+  const realScore = checkResults?.total_score ?? null;
+  const realRating = checkResults?.rating ?? null;
+  const useReal = Boolean(checkResults);
+
   return (
     <div className="overview">
       <section className="assessment">
         <div className="assessment-copy">
-          <span className="eyebrow">{t("overallAssessment")} · {t("evidenceBound")}</span>
-          <div className="assessment-title"><ShieldCheck size={40} /><div><h2>{t("passWithConditions")}</h2><p>{t("assessmentDetail")}</p></div></div>
+          <span className="eyebrow">
+            {useReal ? t("overallAssessment") : t("overallAssessment")} · {t("evidenceBound")}
+          </span>
+          <div className="assessment-title">
+            <ShieldCheck size={40} />
+            <div>
+              <h2>
+                {useReal && realRating
+                  ? realRating.replace(/_/g, " ")
+                  : t("passWithConditions")}
+              </h2>
+              <p>{t("assessmentDetail")}</p>
+            </div>
+          </div>
         </div>
-        <ScoreBlock label={t("trustScore")} value={previewPassport.score} caption={t("projected")} />
-        <ScoreBlock label={t("evidenceCoverage")} value={previewPassport.coverage} caption={`${t("confidence")}: ${t("mediumConfidence")}`} />
+        <ScoreBlock
+          label={t("trustScore")}
+          value={useReal && realScore != null ? realScore : previewPassport.score}
+          caption={useReal ? t("deterministicScore") : t("projected")}
+        />
+        <ScoreBlock
+          label={t("evidenceCoverage")}
+          value={previewPassport.coverage}
+          caption={`${t("confidence")}: ${t("mediumConfidence")}`}
+        />
       </section>
       <section className="dimension-section">
         <div className="section-heading"><h2>{t("auditDimensions")}</h2><span className="preview-pill">{t("preview")}</span></div>
@@ -462,13 +565,13 @@ function Overview({
         <div className="section-heading"><h2>{t("previewCommitments")}</h2><span className="preview-pill">{t("notAttested")}</span></div>
         <div className="hash-grid">
           {([
-            ["passportHash", previewPassport.hashes.passport, Fingerprint],
-            ["auditLogHash", previewPassport.hashes.auditLog, FileCheck2],
-            ["evidenceManifestHash", previewPassport.hashes.evidenceManifest, Database],
+            ["passportHash", passportFreeze?.provenance?.passport_hash ?? previewPassport.hashes.passport, Fingerprint],
+            ["auditLogHash", passportFreeze?.provenance?.audit_log_hash ?? previewPassport.hashes.auditLog, FileCheck2],
+            ["evidenceManifestHash", passportFreeze?.provenance?.evidence_manifest_hash ?? previewPassport.hashes.evidenceManifest, Database],
           ] as Array<[TranslationKey, string, ComponentType<{ size?: number }>]>) .map(([label, value, Icon]) => (
             <div className="hash-card" key={label}>
               <Icon size={20} />
-              <div><span>{t(label)}</span><strong>{value}</strong><small>{t("notAttested")}</small></div>
+              <div><span>{t(label)}</span><strong>{value}</strong><small>{passportFreeze ? t("deterministicScore") : t("notAttested")}</small></div>
               <button onClick={() => copyHash(value)} title={t("copy")}>{copiedHash === value ? <Check size={15} /> : <Copy size={15} />}</button>
             </div>
           ))}
@@ -479,7 +582,40 @@ function Overview({
   );
 }
 
-function Findings({ t }: { t: (key: TranslationKey) => string }) {
+function Findings({
+  t,
+  checkResults,
+}: {
+  t: (key: TranslationKey) => string;
+  checkResults: CheckResults | null;
+}) {
+  if (checkResults?.results?.length) {
+    return (
+      <section className="detail-view">
+        <div className="section-heading">
+          <div><h2>{t("findings")}</h2><p>{checkResults.results.length} {t("checks")}</p></div>
+        </div>
+        <div className="finding-list">
+          {checkResults.results.map((finding) => (
+            <article className="finding-row" key={finding.check_id}>
+              <ShieldAlert size={20} />
+              <div>
+                <div>
+                  <strong>{finding.check_id}</strong>
+                  <span className={`severity-severity-${finding.finding === "pass" ? "low" : finding.finding === "fail" ? "critical" : "medium"}`}>
+                    {finding.finding}
+                  </span>
+                </div>
+                <p>{finding.rationale}</p>
+                <small>{t("evidenceReference")}: {finding.evidence_ids.length > 0 ? finding.evidence_ids.join(", ") : "—"}</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="detail-view">
       <div className="section-heading"><div><span className="preview-pill">{t("preview")}</span><h2>{t("findings")}</h2><p>{t("previewFindingNotice")}</p></div></div>
@@ -495,7 +631,48 @@ function Findings({ t }: { t: (key: TranslationKey) => string }) {
   );
 }
 
-function Evidence({ t }: { t: (key: TranslationKey) => string }) {
+function Evidence({
+  t,
+  evidenceFreeze,
+}: {
+  t: (key: TranslationKey) => string;
+  evidenceFreeze: EvidenceFreezeResult | null;
+}) {
+  if (evidenceFreeze?.evidence_board) {
+    const board = evidenceFreeze.evidence_board;
+    return (
+      <section className="detail-view">
+        <div className="section-heading">
+          <div><h2>{t("evidenceBoard")}</h2><p>{t("evidenceBoardDetail")} — v{board.version}</p></div>
+        </div>
+        <div className="coverage-list">
+          <div className="coverage-row">
+            <div><strong>Evidence IDs</strong><span>{board.evidence_ids.length}</span></div>
+          </div>
+          <div className="coverage-row">
+            <div><strong>Claims</strong><span>{board.claims.length}</span></div>
+          </div>
+          <div className="coverage-row">
+            <div><strong>Gaps</strong><span>{board.gaps.length}</span></div>
+          </div>
+        </div>
+        <table className="claim-table">
+          <thead><tr><th>Claim ID</th><th>Check ID</th><th>Statement</th><th>Confidence</th></tr></thead>
+          <tbody>
+            {board.claims.slice(0, 20).map((claim) => (
+              <tr key={claim.claim_id}>
+                <td>{claim.claim_id}</td>
+                <td>{claim.check_id}</td>
+                <td>{claim.statement}</td>
+                <td>{(claim.confidence * 100).toFixed(0)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    );
+  }
+
   return (
     <section className="detail-view">
       <div className="section-heading"><div><span className="preview-pill">{t("preview")}</span><h2>{t("evidenceBoard")}</h2><p>{t("evidenceBoardDetail")}</p></div></div>

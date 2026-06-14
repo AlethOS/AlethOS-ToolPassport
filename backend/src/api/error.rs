@@ -43,7 +43,7 @@ impl ApiError {
         )
     }
 
-    fn new(
+    pub fn new(
         status: StatusCode,
         code: &'static str,
         message: impl Into<String>,

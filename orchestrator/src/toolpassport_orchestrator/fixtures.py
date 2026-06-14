@@ -82,6 +82,7 @@ def make_mock_evidence(check_ids: list[str], round_num: int) -> list[EvidenceEnt
             EvidenceEntry(
                 evidence_id=f"evidence-r{round_num}-{i}",
                 source_type=source_type,
+                source_url=f"https://example.com/mock/evidence-r{round_num}-{i}",
                 title=f"Round {round_num} source {i}: {source_type}",
                 excerpt=(
                     f"[mock] Documentation excerpt for round {round_num}, source {i}. "

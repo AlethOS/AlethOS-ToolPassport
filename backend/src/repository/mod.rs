@@ -748,6 +748,26 @@ impl Repository {
         .transpose()
     }
 
+    /// Load the latest stored deterministic Check Results for a Run (the one
+    /// with the highest evidence_board_version). Returns None when no check
+    /// results have been stored for the run yet.
+    pub async fn get_latest_check_results(
+        &self,
+        run_id: Uuid,
+    ) -> Result<Option<CheckResults>, RepositoryError> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT result_json FROM check_results WHERE run_id = ? ORDER BY evidence_board_version DESC LIMIT 1",
+        )
+        .bind(run_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|(result_json,)| {
+            serde_json::from_str::<CheckResults>(&result_json).map_err(invalid_stored_data)
+        })
+        .transpose()
+    }
+
     /// Next Passport sequence for a Run (1 if none exists yet). The unique
     /// constraint on `(run_id, sequence)` is the backstop against concurrent
     /// freezes selecting the same value.
