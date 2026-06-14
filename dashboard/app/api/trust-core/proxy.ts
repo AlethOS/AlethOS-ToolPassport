@@ -1,11 +1,11 @@
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8080";
 
-export async function proxyTrustCore(path: string): Promise<Response> {
+async function proxyFetch(path: string, init: RequestInit = {}): Promise<Response> {
   try {
     const response = await fetch(`${BACKEND_URL}${path}`, {
+      ...init,
       cache: "no-store",
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(4_000),
+      signal: AbortSignal.timeout(30_000),
     });
     const body = await response.text();
 
@@ -23,4 +23,16 @@ export async function proxyTrustCore(path: string): Promise<Response> {
       { status: 503 },
     );
   }
+}
+
+export async function proxyTrustCore(path: string): Promise<Response> {
+  return proxyFetch(path, { headers: { accept: "application/json" } });
+}
+
+export async function proxyPost(path: string, body: unknown): Promise<Response> {
+  return proxyFetch(path, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }

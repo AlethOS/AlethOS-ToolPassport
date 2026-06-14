@@ -85,40 +85,6 @@ export interface ApiErrorBody {
   details: unknown;
 }
 
-export type PreviewSeverity = "critical" | "high" | "medium" | "low";
-
-export interface PreviewDimension {
-  id: string;
-  score: number;
-  labelKey: string;
-}
-
-export interface PreviewFinding {
-  id: string;
-  titleKey: string;
-  detailKey: string;
-  severity: PreviewSeverity;
-  evidence: string;
-}
-
-export interface PreviewPassportResult {
-  kind: "preview";
-  score: number;
-  coverage: number;
-  confidenceKey: string;
-  assessmentKey: string;
-  dimensions: PreviewDimension[];
-  findings: PreviewFinding[];
-  capabilities: string[];
-  gaps: string[];
-  limitations: string[];
-  hashes: {
-    passport: string;
-    auditLog: string;
-    evidenceManifest: string;
-  };
-}
-
 export type DashboardTab = "overview" | "findings" | "evidence" | "execution" | "provenance";
 export type Locale = "en" | "zh-CN";
 
@@ -344,6 +310,39 @@ export interface Provenance {
 export interface PassportFreezeResult {
   passport: Passport;
   provenance: Provenance;
+}
+
+export type ApprovalDecision = "approve_offchain" | "approve_testnet_attestation" | "reject";
+
+export interface Approval {
+  approval_schema_version: "0.1.0";
+  approval_id: string;
+  run_id: string;
+  decision: ApprovalDecision;
+  passport_sequence: number;
+  passport_hash: string;
+  audit_log_hash: string;
+  evidence_manifest_hash: string;
+  chain_id: number | null;
+  registry_contract: string | null;
+  decided_at: string;
+}
+
+export interface AttestationReceipt {
+  attestation_receipt_schema_version: "0.1.0";
+  attestation_id: string;
+  run_id: string;
+  tool_id: string;
+  passport_hash: string;
+  audit_log_hash: string;
+  evidence_manifest_hash: string;
+  onchain_run_id: string;
+  chain_id: number;
+  registry_contract: string;
+  status: "submitted" | "confirmed" | "failed";
+  transaction_hash: string | null;
+  submitted_at: string;
+  confirmed_at: string | null;
 }
 
 // ── Events list ─────────────────────────────────────────────────────

@@ -77,17 +77,19 @@ class GraphState(BaseModel):
     run_id: str
     goal: str
     audit_directives: str | None = None
+    research_mode: Literal["mock", "live"] = "mock"
     # Tool identity (populated by intake / fingerprint)
     tool_id: str | None = None
     tool_name: str | None = None
     tool_type: str | None = None
+    canonical_url: str | None = None
     target_revision: str | None = None
     # Standard & Profile (populated by profile_selector)
     standard_version: str = "0.2.0"
     profile_id: str | None = None
     profile_version: str | None = None
     # Orchestration state
-    phase: Literal["intake", "investigation", "evaluation", "done"] = "intake"
+    phase: Literal["intake", "investigation", "evaluation", "waiting_approval", "done"] = "intake"
     current_node: str = ""
     research_round: int = 0
     research_budget: ResearchBudget = Field(default_factory=ResearchBudget)

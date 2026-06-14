@@ -1,8 +1,15 @@
-"""Smoke tests for LangGraph checkpoint persistence."""
+"""Tests for LangGraph checkpoint persistence and process-restart recovery."""
+
+from pathlib import Path
 
 from langgraph.checkpoint.memory import MemorySaver
 
 from toolpassport_orchestrator import GraphState, build_graph
+from toolpassport_orchestrator.checkpoint import (
+    checkpoint_config,
+    has_checkpoint,
+    sqlite_checkpointer,
+)
 from toolpassport_orchestrator.fixtures import MOCK_TOOL
 from toolpassport_orchestrator.state import ResearchBudget
 
@@ -61,3 +68,38 @@ def test_checkpoint_saves_and_resumes() -> None:
     # Should still be done with the same state.
     assert result2.phase == "done"
     assert len(result2.evidence_board) == evidence_count_1
+
+
+def test_sqlite_checkpoint_resumes_across_graph_instances(tmp_path: Path) -> None:
+    """A fresh process-equivalent graph should resume from persisted SQLite state."""
+    database_path = str(tmp_path / "orchestrator-checkpoints.sqlite")
+    initial = GraphState(
+        run_id="persistent-checkpoint-run",
+        goal="Verify persistent checkpoint recovery",
+        tool_id=MOCK_TOOL["tool_id"],
+        tool_name=MOCK_TOOL["name"],
+        tool_type=MOCK_TOOL["tool_type"],
+        target_revision=MOCK_TOOL["target_revision"],
+        research_budget=_initial_budget(),
+    )
+    config = checkpoint_config(initial.run_id)
+
+    with sqlite_checkpointer(database_path) as first_checkpointer:
+        first_graph = build_graph(checkpointer=first_checkpointer)
+        assert not has_checkpoint(first_checkpointer, config)
+        interrupted_result = GraphState.model_validate(
+            first_graph.invoke(initial, config, interrupt_after=["audit_plan_builder"])
+        )
+        assert has_checkpoint(first_checkpointer, config)
+        assert interrupted_result.current_node == "audit_plan_builder"
+        assert interrupted_result.phase != "done"
+        assert not interrupted_result.evidence_board
+
+    with sqlite_checkpointer(database_path) as restarted_checkpointer:
+        restarted_graph = build_graph(checkpointer=restarted_checkpointer)
+        assert has_checkpoint(restarted_checkpointer, config)
+        resumed_result = GraphState.model_validate(restarted_graph.invoke(None, config))
+
+    assert resumed_result.phase == "done"
+    assert resumed_result.evidence_board
+    assert resumed_result.check_findings

@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
   Activity,
   AlertCircle,
@@ -16,7 +16,6 @@ import {
   Database,
   FileCheck2,
   Fingerprint,
-  Gauge,
   Globe2,
   Languages,
   LayoutDashboard,
@@ -30,23 +29,32 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   SquareTerminal,
-  Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType, type CSSProperties } from "react";
 
 import { ExecutionFlow, ProvenanceFlow } from "@/components/flow-panels";
 import {
+  createApproval,
+  createRun,
+  createTool,
+  getApproval,
+  getAttestation,
   getEvidenceBoard,
   getHealth,
   getRunCheckResults,
   getRunDetails,
   getPassport,
   getRuns,
+  launchInvestigation,
+  resolveTool,
+  submitAttestation,
 } from "@/lib/api";
 import { translate, type TranslationKey } from "@/lib/i18n";
-import { evidenceClaims, evidenceCoverage, previewPassport } from "@/lib/preview";
 import type {
   CheckResults,
+  Approval,
+  ApprovalDecision,
+  AttestationReceipt,
   DashboardTab,
   EvidenceFreezeResult,
   Locale,
@@ -116,6 +124,64 @@ export function TrustControlDesk() {
   const [filter, setFilter] = useState<"all" | RunStatus>("all");
   const [tab, setTab] = useState<DashboardTab>("overview");
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const [auditUrl, setAuditUrl] = useState("");
+  const [auditDirectives, setAuditDirectives] = useState("");
+  const [auditStatus, setAuditStatus] = useState<"idle" | "resolving" | "creating" | "done" | "error">("idle");
+  const [auditError, setAuditError] = useState<string | null>(null);
+
+  const auditMutation = useMutation({
+    mutationFn: async (url: string) => {
+      setAuditStatus("resolving");
+      setAuditError(null);
+
+      // Extract repo name from GitHub URL for the tool name.
+      const name = url.replace(/^https?:\/\/github\.com\//, "").replace(/\/$/, "").replace(/\.git$/, "");
+
+      // Resolve or create the tool.
+      const resolved = await resolveTool({ intake_version: "0.1.0", name, tool_type: "generic", urls: [url] });
+      let toolId = resolved.tool_id;
+      if (resolved.status === "create_candidate" && resolved.normalized_identifiers.length === 1) {
+        const identifier = resolved.normalized_identifiers[0];
+        toolId = `${identifier.namespace}:${identifier.value}`;
+        await createTool({
+          tool_id: toolId,
+          name,
+          tool_type: "generic",
+          canonical_url: identifier.canonical_url,
+          external_identifiers: [identifier],
+          aliases: [],
+        });
+      }
+      if (!toolId) {
+        throw new Error(`Tool identity requires human review: ${resolved.reason_codes.join(", ")}`);
+      }
+
+      // Create the audit run.
+      setAuditStatus("creating");
+      const run = await createRun(
+        auditDirectives.trim()
+          ? `Audit ${name}. Directives: ${auditDirectives.trim()}`
+          : `Audit ${name} as a software tool`,
+        toolId,
+      );
+
+      // Launch the orchestrator investigation in the background.
+      await launchInvestigation(run.run_id);
+
+      return run;
+    },
+    onSuccess: (run) => {
+      setAuditStatus("done");
+      setSelectedRunId(run.run_id);
+      setAuditUrl("");
+      setAuditDirectives("");
+      setTimeout(() => setAuditStatus("idle"), 2000);
+    },
+    onError: (error: Error) => {
+      setAuditStatus("error");
+      setAuditError(error.message);
+    },
+  });
   const t = (key: TranslationKey) => translate(locale, key);
   const refreshInterval = autoRefresh ? 5_000 : false;
 
@@ -135,7 +201,7 @@ export function TrustControlDesk() {
     refetchInterval: refreshInterval,
   });
   const selectedRun = detailsQuery.data?.run ?? runs.find((run) => run.run_id === activeRunId) ?? null;
-  const events = detailsQuery.data?.events ?? [];
+  const events = useMemo(() => detailsQuery.data?.events ?? [], [detailsQuery.data?.events]);
 
   // Derive frozen board version and passport sequence from events.
   const frozenBoardVersion = useMemo(() => {
@@ -173,6 +239,56 @@ export function TrustControlDesk() {
     enabled: Boolean(activeRunId && passportSequence),
   });
   const passportFreeze: PassportFreezeResult | null = passportQuery.data ?? null;
+  const approvalQuery = useQuery({
+    queryKey: ["approval", activeRunId],
+    queryFn: () => getApproval(activeRunId!),
+    enabled: Boolean(activeRunId),
+    refetchInterval: refreshInterval,
+  });
+  const approval: Approval | null = approvalQuery.data?.approval_schema_version === "0.1.0"
+    ? approvalQuery.data
+    : null;
+  const attestationQuery = useQuery({
+    queryKey: ["attestation", activeRunId],
+    queryFn: () => getAttestation(activeRunId!),
+    enabled: Boolean(activeRunId),
+    refetchInterval: refreshInterval,
+  });
+  const attestation: AttestationReceipt | null =
+    attestationQuery.data?.attestation_receipt_schema_version === "0.1.0"
+      ? attestationQuery.data
+      : null;
+  const approvalMutation = useMutation({
+    mutationFn: async ({ decision, registryContract }: { decision: ApprovalDecision; registryContract?: string }) => {
+      if (!activeRunId || !passportFreeze) throw new Error("Frozen Passport provenance is required");
+      return createApproval(activeRunId, {
+        approval_schema_version: "0.1.0",
+        decision,
+        passport_sequence: passportFreeze.passport.passport_sequence,
+        passport_hash: passportFreeze.provenance.passport_hash,
+        audit_log_hash: passportFreeze.provenance.audit_log_hash,
+        evidence_manifest_hash: passportFreeze.provenance.evidence_manifest_hash,
+        chain_id: decision === "approve_testnet_attestation" ? 11_155_111 : null,
+        registry_contract: decision === "approve_testnet_attestation" ? registryContract ?? null : null,
+      });
+    },
+    onSuccess: () => {
+      void runsQuery.refetch();
+      void detailsQuery.refetch();
+      void approvalQuery.refetch();
+    },
+  });
+  const attestationMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeRunId) throw new Error("Run is required");
+      return submitAttestation(activeRunId);
+    },
+    onSuccess: () => {
+      void runsQuery.refetch();
+      void detailsQuery.refetch();
+      void attestationQuery.refetch();
+    },
+  });
 
   const filteredRuns = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -218,6 +334,17 @@ export function TrustControlDesk() {
           setAutoRefresh={setAutoRefresh}
         />
         <main className="desk-main">
+          <AuditBar
+            t={t}
+            url={auditUrl}
+            setUrl={setAuditUrl}
+            directives={auditDirectives}
+            setDirectives={setAuditDirectives}
+            status={auditStatus}
+            error={auditError}
+            onAudit={() => auditMutation.mutate(auditUrl)}
+            onDismiss={() => { setAuditStatus("idle"); setAuditError(null); }}
+          />
           <MetricStrip t={t} runs={runs.length} counts={counts} online={healthQuery.isSuccess} />
           <div className="desk-grid">
             <RunQueue
@@ -244,6 +371,7 @@ export function TrustControlDesk() {
               checkResults={checkResults}
               evidenceFreeze={evidenceFreeze}
               passportFreeze={passportFreeze}
+              attestation={attestation}
             />
             <TrustInspector
               t={t}
@@ -253,6 +381,15 @@ export function TrustControlDesk() {
               error={detailsQuery.isError}
               locale={locale}
               openFindings={() => setTab("findings")}
+              canApprove={Boolean(passportFreeze)}
+              approvalPending={approvalMutation.isPending}
+              approvalError={approvalMutation.error?.message ?? null}
+              decide={(decision, registryContract) => approvalMutation.mutate({ decision, registryContract })}
+              approval={approval}
+              attestation={attestation}
+              attestationPending={attestationMutation.isPending}
+              attestationError={attestationMutation.error?.message ?? null}
+              submitAttestation={() => attestationMutation.mutate()}
             />
           </div>
         </main>
@@ -332,6 +469,76 @@ function Topbar({
   );
 }
 
+function AuditBar({
+  t,
+  url,
+  setUrl,
+  directives,
+  setDirectives,
+  status,
+  error,
+  onAudit,
+  onDismiss,
+}: {
+  t: (key: TranslationKey) => string;
+  url: string;
+  setUrl: (v: string) => void;
+  directives: string;
+  setDirectives: (v: string) => void;
+  status: string;
+  error: string | null;
+  onAudit: () => void;
+  onDismiss: () => void;
+}) {
+  const isLoading = status === "resolving" || status === "creating";
+  const isDone = status === "done";
+
+  return (
+    <div className="audit-bar">
+      <div className="audit-bar-row">
+        <Globe2 size={18} />
+        <input
+          type="url"
+          placeholder="https://github.com/owner/repo"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && url && !isLoading) onAudit(); }}
+          disabled={isLoading}
+          className="audit-url-input"
+        />
+        <input
+          type="text"
+          placeholder={t("auditDirectivesPlaceholder") ?? "Directives (optional)"}
+          value={directives}
+          onChange={(e) => setDirectives(e.target.value)}
+          disabled={isLoading}
+          className="audit-directives-input"
+        />
+        <button
+          onClick={onAudit}
+          disabled={!url || isLoading}
+          className={isDone ? "audit-btn done" : "audit-btn"}
+        >
+          {isLoading && <LoaderCircle size={14} className="spin" />}
+          {isDone && <Check size={14} />}
+          {status === "idle" && <Search size={14} />}
+          {status === "error" && <AlertCircle size={14} />}
+          <span>
+            {isLoading ? t("auditing") : isDone ? t("auditCreated") : t("startAudit")}
+          </span>
+        </button>
+      </div>
+      {error && (
+        <div className="audit-error">
+          <AlertCircle size={14} />
+          <span>{error}</span>
+          <button onClick={onDismiss}>{t("dismiss")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MetricStrip({
   t,
   runs,
@@ -344,20 +551,17 @@ function MetricStrip({
   online: boolean;
 }) {
   const metrics = [
-    { label: t("runs"), value: runs, icon: ListChecks, preview: false },
-    { label: t("running"), value: counts.running, icon: Activity, preview: false },
-    { label: t("waitingApproval"), value: counts.waiting, icon: Clock3, preview: false },
-    { label: t("completed"), value: counts.completed, icon: CheckCircle2, preview: false },
-    { label: t("previewCoverage"), value: `${previewPassport.coverage}%`, icon: Gauge, preview: true },
-    { label: t("previewScore"), value: previewPassport.score, icon: ShieldCheck, preview: true },
+    { label: t("runs"), value: runs, icon: ListChecks },
+    { label: t("running"), value: counts.running, icon: Activity },
+    { label: t("waitingApproval"), value: counts.waiting, icon: Clock3 },
+    { label: t("completed"), value: counts.completed, icon: CheckCircle2 },
   ];
   return (
     <section className="metric-strip" aria-label={t("localTrustCore")}>
-      {metrics.map(({ label, value, icon: Icon, preview }) => (
+      {metrics.map(({ label, value, icon: Icon }) => (
         <div className="metric" key={label}>
           <div>
             <span>{label}</span>
-            {preview && <small>{t("preview")}</small>}
           </div>
           <strong>{value}</strong>
           <Icon size={18} aria-hidden="true" />
@@ -443,6 +647,7 @@ function ResultWorkspace({
   checkResults,
   evidenceFreeze,
   passportFreeze,
+  attestation,
 }: {
   t: (key: TranslationKey) => string;
   selectedRun: Run | null;
@@ -454,15 +659,14 @@ function ResultWorkspace({
   checkResults: CheckResults | null;
   evidenceFreeze: EvidenceFreezeResult | null;
   passportFreeze: PassportFreezeResult | null;
+  attestation: AttestationReceipt | null;
 }) {
-  const hasRealData = Boolean(checkResults || evidenceFreeze || passportFreeze);
-
   return (
     <section className="panel result-workspace">
       <header className="result-header">
         <div>
           <span>{selectedRun ? t("selectedRun") : t("noRunSelected")}</span>
-          <strong>{selectedRun ? `${selectedRun.tool.name} · ${shortId(selectedRun.run_id)}` : t("previewWorkspace")}</strong>
+          <strong>{selectedRun ? `${selectedRun.tool.name} · ${shortId(selectedRun.run_id)}` : t("noRunSelected")}</strong>
         </div>
         {selectedRun && <StatusBadge status={selectedRun.status} t={t} />}
       </header>
@@ -471,11 +675,9 @@ function ResultWorkspace({
           <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{t(item)}</button>
         ))}
       </nav>
-      {!hasRealData && (
-        <div className="preview-banner"><Zap size={15} /><strong>{t("preview")}</strong><span>{t("previewDataNotice")}</span></div>
-      )}
       <div className="result-content">
-        {tab === "overview" && (
+        {!selectedRun && <StateMessage icon={SquareTerminal} title={t("noRunSelected")} detail={t("noRunsDetail")} />}
+        {selectedRun && tab === "overview" && (
           <Overview
             t={t}
             copiedHash={copiedHash}
@@ -485,10 +687,24 @@ function ResultWorkspace({
             passportFreeze={passportFreeze}
           />
         )}
-        {tab === "findings" && <Findings t={t} checkResults={checkResults} />}
-        {tab === "evidence" && <Evidence t={t} evidenceFreeze={evidenceFreeze} />}
-        {tab === "execution" && <ExecutionFlow currentNode={currentNode} t={t} />}
-        {tab === "provenance" && <ProvenanceFlow t={t} />}
+        {selectedRun && tab === "findings" && <Findings t={t} checkResults={checkResults} />}
+        {selectedRun && tab === "evidence" && <Evidence t={t} evidenceFreeze={evidenceFreeze} />}
+        {selectedRun && tab === "execution" && <ExecutionFlow currentNode={currentNode} t={t} />}
+        {selectedRun && tab === "provenance" && (
+          passportFreeze
+            ? (
+              <>
+                <ProvenanceFlow t={t} authoritative />
+                {attestation && (
+                  <section className="trust-boundary">
+                    <BadgeCheck size={14} />
+                    {t("attestationConfirmed")}: {attestation.transaction_hash}
+                  </section>
+                )}
+              </>
+            )
+            : <StateMessage icon={Fingerprint} title={t("authoritativeDataPending")} detail={t("provenancePendingDetail")} />
+        )}
       </div>
     </section>
   );
@@ -509,46 +725,68 @@ function Overview({
   checkResults: CheckResults | null;
   passportFreeze: PassportFreezeResult | null;
 }) {
-  const realScore = checkResults?.total_score ?? null;
-  const realRating = checkResults?.rating ?? null;
-  const useReal = Boolean(checkResults);
+  if (!checkResults) {
+    return <StateMessage icon={ShieldCheck} title={t("authoritativeDataPending")} detail={t("resultsPendingDetail")} />;
+  }
+
+  const dimensionLabels: Record<string, TranslationKey> = {
+    capability_clarity: "capabilityClarity",
+    interface_openness: "interfaceOpenness",
+    automation_readiness: "automationReadiness",
+    data_portability: "dataPortability",
+    permission_risk: "permissionRisk",
+    evidence_quality: "evidenceQuality",
+    ecosystem_fit: "ecosystemFit",
+  };
+  const dimensions = Object.values(checkResults.dimension_scores);
+  const evidenceCoverage = checkResults.results.length === 0
+    ? 0
+    : Math.round(
+      checkResults.results.filter((finding) => finding.evidence_ids.length > 0).length
+      / checkResults.results.length
+      * 100,
+    );
+  const failedFindings = checkResults.results
+    .filter((finding) => finding.finding === "fail" || finding.finding === "unknown")
+    .map((finding) => finding.check_id);
+  const capabilities = passportFreeze?.passport.capability_claims.map((claim) => claim.statement) ?? [];
+  const gaps = passportFreeze?.passport.known_gaps ?? [];
+  const risks = passportFreeze?.passport.risks.map((risk) => risk.title) ?? [];
 
   return (
     <div className="overview">
       <section className="assessment">
         <div className="assessment-copy">
           <span className="eyebrow">
-            {useReal ? t("overallAssessment") : t("overallAssessment")} · {t("evidenceBound")}
+            {t("overallAssessment")} · {t("authoritative")}
           </span>
           <div className="assessment-title">
             <ShieldCheck size={40} />
             <div>
               <h2>
-                {useReal && realRating
-                  ? realRating.replace(/_/g, " ")
-                  : t("passWithConditions")}
+                {checkResults.rating.replace(/_/g, " ")}
               </h2>
-              <p>{t("assessmentDetail")}</p>
+              <p>{passportFreeze?.passport.recommendation.summary ?? t("resultsPendingPassportDetail")}</p>
             </div>
           </div>
         </div>
         <ScoreBlock
           label={t("trustScore")}
-          value={useReal && realScore != null ? realScore : previewPassport.score}
-          caption={useReal ? t("deterministicScore") : t("projected")}
+          value={checkResults.total_score}
+          caption={t("deterministicScore")}
         />
         <ScoreBlock
           label={t("evidenceCoverage")}
-          value={previewPassport.coverage}
-          caption={`${t("confidence")}: ${t("mediumConfidence")}`}
+          value={evidenceCoverage}
+          caption={t("evidenceReferenceCoverage")}
         />
       </section>
       <section className="dimension-section">
-        <div className="section-heading"><h2>{t("auditDimensions")}</h2><span className="preview-pill">{t("preview")}</span></div>
+        <div className="section-heading"><h2>{t("auditDimensions")}</h2></div>
         <div className="dimensions">
-          {previewPassport.dimensions.map((dimension) => (
-            <div className="dimension" key={dimension.id}>
-              <span>{t(dimension.labelKey as TranslationKey)}</span>
+          {dimensions.map((dimension) => (
+            <div className="dimension" key={dimension.dimension_id}>
+              <span>{t(dimensionLabels[dimension.dimension_id] ?? "auditDimensions")}</span>
               <strong className={scoreTone(dimension.score)}>{dimension.score}</strong>
               <Progress value={dimension.score} />
             </div>
@@ -556,28 +794,28 @@ function Overview({
         </div>
       </section>
       <section className="insight-grid">
-        <InsightList icon={ShieldAlert} title={t("highRiskFindings")} tone="danger" items={previewPassport.findings.slice(0, 2).map((item) => t(item.titleKey as TranslationKey))} action={t("viewAllFindings")} onAction={() => setTab("findings")} />
-        <InsightList icon={CheckCircle2} title={t("supportedCapabilities")} tone="good" items={previewPassport.capabilities.map((item) => t(item as TranslationKey))} />
-        <InsightList icon={AlertTriangle} title={t("unresolvedGaps")} tone="warn" items={previewPassport.gaps.map((item) => t(item as TranslationKey))} />
-        <InsightList icon={Globe2} title={t("scopeLimitations")} tone="info" items={previewPassport.limitations.map((item) => t(item as TranslationKey))} />
+        <InsightList icon={ShieldAlert} title={t("failedOrUnknownFindings")} tone="danger" items={failedFindings} action={t("viewAllFindings")} onAction={() => setTab("findings")} />
+        <InsightList icon={CheckCircle2} title={t("supportedCapabilities")} tone="good" items={capabilities} />
+        <InsightList icon={AlertTriangle} title={t("unresolvedGaps")} tone="warn" items={gaps} />
+        <InsightList icon={Globe2} title={t("recordedRisks")} tone="info" items={risks} />
       </section>
-      <section className="hash-section">
-        <div className="section-heading"><h2>{t("previewCommitments")}</h2><span className="preview-pill">{t("notAttested")}</span></div>
+      {passportFreeze && <section className="hash-section">
+        <div className="section-heading"><h2>{t("frozenCommitments")}</h2><span className="authority-chip online">{t("authoritative")}</span></div>
         <div className="hash-grid">
           {([
-            ["passportHash", passportFreeze?.provenance?.passport_hash ?? previewPassport.hashes.passport, Fingerprint],
-            ["auditLogHash", passportFreeze?.provenance?.audit_log_hash ?? previewPassport.hashes.auditLog, FileCheck2],
-            ["evidenceManifestHash", passportFreeze?.provenance?.evidence_manifest_hash ?? previewPassport.hashes.evidenceManifest, Database],
+            ["passportHash", passportFreeze.provenance.passport_hash, Fingerprint],
+            ["auditLogHash", passportFreeze.provenance.audit_log_hash, FileCheck2],
+            ["evidenceManifestHash", passportFreeze.provenance.evidence_manifest_hash, Database],
           ] as Array<[TranslationKey, string, ComponentType<{ size?: number }>]>) .map(([label, value, Icon]) => (
             <div className="hash-card" key={label}>
               <Icon size={20} />
-              <div><span>{t(label)}</span><strong>{value}</strong><small>{passportFreeze ? t("deterministicScore") : t("notAttested")}</small></div>
+              <div><span>{t(label)}</span><strong>{value}</strong><small>{t("frozenByTrustCore")}</small></div>
               <button onClick={() => copyHash(value)} title={t("copy")}>{copiedHash === value ? <Check size={15} /> : <Copy size={15} />}</button>
             </div>
           ))}
         </div>
         <p className="trust-boundary"><AlertCircle size={14} />{t("trustBoundary")}</p>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -616,19 +854,7 @@ function Findings({
     );
   }
 
-  return (
-    <section className="detail-view">
-      <div className="section-heading"><div><span className="preview-pill">{t("preview")}</span><h2>{t("findings")}</h2><p>{t("previewFindingNotice")}</p></div></div>
-      <div className="finding-list">
-        {previewPassport.findings.map((finding) => (
-          <article className="finding-row" key={finding.id}>
-            <ShieldAlert size={20} />
-            <div><div><strong>{t(finding.titleKey as TranslationKey)}</strong><Severity severity={finding.severity} t={t} /></div><p>{t(finding.detailKey as TranslationKey)}</p><small>{t("evidenceReference")}: {finding.evidence}</small></div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
+  return <StateMessage icon={ShieldAlert} title={t("authoritativeDataPending")} detail={t("resultsPendingDetail")} />;
 }
 
 function Evidence({
@@ -656,6 +882,12 @@ function Evidence({
             <div><strong>Gaps</strong><span>{board.gaps.length}</span></div>
           </div>
         </div>
+        {board.evidence_ids.length > 0 && board.claims.length === 0 && (
+          <p className="trust-boundary">
+            <AlertCircle size={14} />
+            {t("unlinkedEvidenceNotice")}
+          </p>
+        )}
         <table className="claim-table">
           <thead><tr><th>Claim ID</th><th>Check ID</th><th>Statement</th><th>Confidence</th></tr></thead>
           <tbody>
@@ -673,18 +905,7 @@ function Evidence({
     );
   }
 
-  return (
-    <section className="detail-view">
-      <div className="section-heading"><div><span className="preview-pill">{t("preview")}</span><h2>{t("evidenceBoard")}</h2><p>{t("evidenceBoardDetail")}</p></div></div>
-      <div className="coverage-list">
-        {evidenceCoverage.map((item) => <div className="coverage-row" key={item.labelKey}><div><strong>{t(item.labelKey as TranslationKey)}</strong><span>{item.count}</span></div><Progress value={item.value} /><b>{item.value}%</b></div>)}
-      </div>
-      <div className="claim-table">
-        <div className="claim-head"><span>{t("claim")}</span><span>{t("status")}</span><span>{t("sources")}</span></div>
-        {evidenceClaims.map((item) => <div className="claim-row" key={item.claimKey}><strong>{t(item.claimKey as TranslationKey)}</strong><span className={`claim-status ${item.statusKey}`}>{t(item.statusKey as TranslationKey)}</span><b>{item.evidence}</b></div>)}
-      </div>
-    </section>
-  );
+  return <StateMessage icon={Database} title={t("authoritativeDataPending")} detail={t("evidencePendingDetail")} />;
 }
 
 function TrustInspector({
@@ -695,6 +916,15 @@ function TrustInspector({
   error,
   locale,
   openFindings,
+  canApprove,
+  approvalPending,
+  approvalError,
+  decide,
+  approval,
+  attestation,
+  attestationPending,
+  attestationError,
+  submitAttestation,
 }: {
   t: (key: TranslationKey) => string;
   run: Run | null;
@@ -703,7 +933,17 @@ function TrustInspector({
   error: boolean;
   locale: Locale;
   openFindings: () => void;
+  canApprove: boolean;
+  approvalPending: boolean;
+  approvalError: string | null;
+  decide: (decision: ApprovalDecision, registryContract?: string) => void;
+  approval: Approval | null;
+  attestation: AttestationReceipt | null;
+  attestationPending: boolean;
+  attestationError: string | null;
+  submitAttestation: () => void;
 }) {
+  const [registryContract, setRegistryContract] = useState("");
   return (
     <aside className="panel inspector">
       <PanelTitle title={t("trustInspector")} authority={t("authoritative")} />
@@ -739,6 +979,38 @@ function TrustInspector({
           <section className="inspector-section review-boundary">
             <h2><ShieldCheck size={16} />{t("humanReviewBoundary")}</h2>
             <p>{run?.status === "waiting_approval" ? t("humanReviewRequired") : t("noHumanReview")}</p>
+            {run?.status === "waiting_approval" && canApprove && (
+              <div className="approval-actions">
+                <input
+                  aria-label={t("registryContract")}
+                  placeholder="0x..."
+                  value={registryContract}
+                  onChange={(event) => setRegistryContract(event.target.value)}
+                  disabled={approvalPending}
+                />
+                <button disabled={approvalPending} onClick={() => decide("approve_offchain")}>{t("approveOffchain")}</button>
+                <button disabled={approvalPending || !registryContract} onClick={() => decide("approve_testnet_attestation", registryContract)}>{t("approveSepolia")}</button>
+                <button disabled={approvalPending} onClick={() => decide("reject")}>{t("rejectRun")}</button>
+                {approvalError && <p className="text-danger">{approvalError}</p>}
+              </div>
+            )}
+            {approval?.decision === "approve_testnet_attestation" && !attestation && (
+              <div className="approval-actions">
+                <p>{t("attestationSubmitWarning")}</p>
+                <button disabled={attestationPending} onClick={submitAttestation}>
+                  {attestationPending ? t("submittingAttestation") : t("submitSepoliaAttestation")}
+                </button>
+                {attestationError && <p className="text-danger">{attestationError}</p>}
+              </div>
+            )}
+            {attestation && (
+              <dl className="run-facts">
+                <Fact label={t("attestationStatus")} value={attestation.status} />
+                <Fact label={t("transactionHash")} value={attestation.transaction_hash ?? "—"} />
+                <Fact label={t("registryContract")} value={attestation.registry_contract} />
+                <Fact label="Chain ID" value={attestation.chain_id.toString()} />
+              </dl>
+            )}
             <button onClick={openFindings}>{t("openFindings")}<ChevronRight size={15} /></button>
           </section>
         </>
@@ -787,10 +1059,6 @@ function Progress({ value }: { value: number }) {
 
 function InsightList({ icon: Icon, title, items, tone, action, onAction }: { icon: ComponentType<{ size?: number }>; title: string; items: string[]; tone: string; action?: string; onAction?: () => void }) {
   return <article className={`insight ${tone}`}><h3><Icon size={16} />{title}</h3><ul>{items.slice(0, 5).map((item) => <li key={item}><CheckCircle2 size={13} />{item}</li>)}</ul>{action && <button onClick={onAction}>{action}<ChevronRight size={14} /></button>}</article>;
-}
-
-function Severity({ severity, t }: { severity: "critical" | "high" | "medium" | "low"; t: (key: TranslationKey) => string }) {
-  return <span className={`severity ${severity}`}>{t(severity)}</span>;
 }
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {

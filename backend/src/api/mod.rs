@@ -11,21 +11,22 @@ use axum::{
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Artifact, CheckResults,
-        CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
-        CreateToolRequest, Evidence, EvidenceFreezeResult, FreezeEvidenceBoardRequest,
-        FreezePassportRequest, PassportFreezeResult, ResolveToolRequest, Run, RunDetails, RunEvent,
-        Tool,
+        AddIdentifierRequest, AppendRunEventRequest, Approval, Artifact, AttestationReceipt,
+        CheckResults, CheckResultsSubmission, CreateApprovalRequest, CreateArtifactRequest,
+        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, EvidenceFreezeResult,
+        FreezeEvidenceBoardRequest, FreezePassportRequest, PassportFreezeResult,
+        ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
     },
     repository::Repository,
     services::{
-        DEFAULT_MAX_STORED_BYTES, EventBroadcaster, ServiceError, StorageService, TrustCoreService,
+        AlloyAttestationSubmitter, AttestationSubmitter, DEFAULT_MAX_STORED_BYTES,
+        EventBroadcaster, ServiceError, StorageService, TrustCoreService,
     },
 };
 
@@ -80,10 +81,23 @@ pub fn app(pool: SqlitePool) -> Router {
 }
 
 pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
+    app_with_storage_and_submitter(pool, storage, Arc::new(AlloyAttestationSubmitter))
+}
+
+pub fn app_with_storage_and_submitter(
+    pool: SqlitePool,
+    storage: StorageService,
+    attestation_submitter: Arc<dyn AttestationSubmitter>,
+) -> Router {
     let body_limit = storage.max_bytes() + 64 * 1024;
     let broadcaster = EventBroadcaster::new();
     let state = AppState {
-        service: TrustCoreService::new(Repository::new(pool), storage, broadcaster),
+        service: TrustCoreService::with_attestation_submitter(
+            Repository::new(pool),
+            storage,
+            broadcaster,
+            attestation_submitter,
+        ),
     };
 
     Router::new()
@@ -95,6 +109,7 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
             post(append_event).get(list_run_events),
         )
         .route("/api/runs/{run_id}/events/stream", get(stream_run_events))
+        .route("/api/runs/{run_id}/investigate", post(launch_investigation))
         .route(
             "/api/runs/{run_id}/check-results",
             post(create_check_results).get(get_latest_check_results),
@@ -108,6 +123,14 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
             get(get_evidence_freeze),
         )
         .route("/api/runs/{run_id}/passport/freeze", post(freeze_passport))
+        .route(
+            "/api/runs/{run_id}/approval",
+            post(create_approval).get(get_approval),
+        )
+        .route(
+            "/api/runs/{run_id}/attestation",
+            post(submit_attestation).get(get_attestation),
+        )
         .route(
             "/api/runs/{run_id}/passport/{sequence}",
             get(get_passport_freeze),
@@ -219,6 +242,38 @@ async fn get_passport_freeze(
 ) -> ApiResult<Json<PassportFreezeResult>> {
     let freeze = state.service.get_passport_freeze(&run_id, sequence).await?;
     Ok(Json(freeze))
+}
+
+async fn create_approval(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<CreateApprovalRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<Approval>)> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let approval = state.service.create_approval(&run_id, request).await?;
+    Ok((StatusCode::CREATED, Json(approval)))
+}
+
+async fn get_approval(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<Approval>> {
+    Ok(Json(state.service.get_approval(&run_id).await?))
+}
+
+async fn submit_attestation(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<(StatusCode, Json<AttestationReceipt>)> {
+    let receipt = state.service.submit_attestation(&run_id).await?;
+    Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+async fn get_attestation(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<AttestationReceipt>> {
+    Ok(Json(state.service.get_attestation(&run_id).await?))
 }
 
 async fn create_tool(
@@ -390,4 +445,47 @@ async fn get_latest_check_results(
             serde_json::json!({}),
         )),
     }
+}
+
+/// POST /api/runs/{run_id}/investigate
+/// Launches the orchestrator subprocess for the given run.
+/// The orchestrator reads BACKEND_URL and RUN_ID from the environment.
+async fn launch_investigation(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let run = state.service.get_run_details(&run_id).await?;
+
+    let backend_url =
+        std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
+    let python_cmd = std::env::var("ORCHESTRATOR_PYTHON").unwrap_or_else(|_| "python3".to_owned());
+    let orch_dir =
+        std::env::var("ORCHESTRATOR_DIR").unwrap_or_else(|_| "../orchestrator".to_owned());
+    let live_research = std::env::var("ORCHESTRATOR_LIVE_RESEARCH").unwrap_or_default();
+    let checkpoint_db = std::env::var("ORCHESTRATOR_CHECKPOINT_DB")
+        .unwrap_or_else(|_| "../data/orchestrator-checkpoints.sqlite".to_owned());
+
+    let mut cmd = std::process::Command::new(&python_cmd);
+    cmd.arg("scripts/live_audit.py")
+        .arg(&run.run.canonical_url)
+        .env("BACKEND_URL", &backend_url)
+        .env("RUN_ID", run.run.run_id.to_string())
+        .env("PYTHONPATH", "src")
+        .env("ORCHESTRATOR_LIVE_RESEARCH", &live_research)
+        .env("CHECKPOINT_DB", &checkpoint_db)
+        .env("LANGGRAPH_STRICT_MSGPACK", "true")
+        .current_dir(&orch_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    let child = cmd.spawn().map_err(|error| {
+        ServiceError::InvalidRequest(format!("failed to launch orchestrator: {error}"))
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "status": "launched",
+        "mode": "start_or_resume",
+        "run_id": run.run.run_id.to_string(),
+        "pid": child.id(),
+    })))
 }

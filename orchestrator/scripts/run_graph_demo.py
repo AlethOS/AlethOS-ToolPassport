@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
 
 from toolpassport_orchestrator import GraphState, build_graph
 from toolpassport_orchestrator.backend_client import BackendClient, set_backend_client
+from toolpassport_orchestrator.checkpoint import checkpoint_config, has_checkpoint, sqlite_checkpointer
 from toolpassport_orchestrator.fixtures import MOCK_TOOL
 
 
@@ -37,14 +37,6 @@ def main() -> None:
         print(f"=== Backend: {backend_url} ===")
 
     # Configure LangGraph checkpoint persistence.
-    checkpointer = None
-    config: dict[str, Any] | None = None
-    if checkpoint_db:
-        from langgraph.checkpoint.memory import MemorySaver
-        checkpointer = MemorySaver()
-        config = {"configurable": {"thread_id": "00000000-0000-0000-0000-000000000001"}}
-        print("=== Checkpoint: memory ===")
-
     initial = GraphState(
         run_id="00000000-0000-0000-0000-000000000001",
         goal="Audit LangGraph as an agent framework for long-horizon AI workflows",
@@ -52,13 +44,14 @@ def main() -> None:
         tool_id=MOCK_TOOL["tool_id"],
         tool_name=MOCK_TOOL["name"],
         tool_type=MOCK_TOOL["tool_type"],
+        canonical_url=MOCK_TOOL["canonical_url"],
         target_revision=MOCK_TOOL["target_revision"],
     )
 
     mode_label = "LLM (GLM)" if use_llm else "mock"
     if backend:
         mode_label += "+backend"
-    if checkpointer:
+    if checkpoint_db:
         mode_label += "+checkpoint"
     print(f"=== ToolPassport Investigation [{mode_label} mode] ===")
     print(f"tool_id       : {initial.tool_id}")
@@ -67,10 +60,16 @@ def main() -> None:
     print(f"max_rounds    : {initial.research_budget.max_rounds}")
     print()
 
-    graph = build_graph(use_llm=use_llm, checkpointer=checkpointer)
-    result = GraphState.model_validate(
-        graph.invoke(initial, config) if config else graph.invoke(initial)
-    )
+    if checkpoint_db:
+        config = checkpoint_config(initial.run_id)
+        with sqlite_checkpointer(checkpoint_db) as checkpointer:
+            graph = build_graph(use_llm=use_llm, checkpointer=checkpointer)
+            resume = has_checkpoint(checkpointer, config)
+            print(f"=== Checkpoint: sqlite ({'resume' if resume else 'new'}) ===")
+            result = GraphState.model_validate(graph.invoke(None if resume else initial, config))
+    else:
+        graph = build_graph(use_llm=use_llm)
+        result = GraphState.model_validate(graph.invoke(initial))
 
     print(f"phase              : {result.phase}")
     print(f"current_node       : {result.current_node}")

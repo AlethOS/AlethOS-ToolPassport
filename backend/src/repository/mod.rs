@@ -12,10 +12,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    Artifact, AuditBinding, CheckResults, Evidence, EvidenceFreezeResult, EvidenceSourceType,
-    ExternalIdentifier, FrozenEvidenceBoard, FrozenEvidenceManifest, Passport,
-    PassportFreezeResult, Provenance, Run, RunEvent, RunEventType, RunStatus, Tool, ToolInput,
-    ToolType, ZERO_HASH,
+    Approval, Artifact, AttestationReceipt, AuditBinding, CheckResults, Evidence,
+    EvidenceFreezeResult, EvidenceSourceType, ExternalIdentifier, FrozenEvidenceBoard,
+    FrozenEvidenceManifest, Passport, PassportFreezeResult, Provenance, Run, RunEvent,
+    RunEventType, RunStatus, Tool, ToolInput, ToolType, ZERO_HASH,
 };
 
 #[derive(Debug, Error)]
@@ -879,6 +879,152 @@ impl Repository {
             })
         })
         .transpose()
+    }
+
+    pub async fn create_approval(
+        &self,
+        approval: &Approval,
+        event: &RunEvent,
+        expected_status: RunStatus,
+        next_status: RunStatus,
+    ) -> Result<Approval, RepositoryError> {
+        let approval_json = serde_json::to_string(approval).map_err(invalid_stored_data)?;
+        let event_payload = serde_json::to_string(&event.payload).map_err(invalid_stored_data)?;
+        let run_id = approval.run_id.to_string();
+        let decided_at = format_timestamp(approval.decided_at);
+        let mut transaction = self.pool.begin().await?;
+
+        let update = sqlx::query(
+            "UPDATE runs SET status = ?, current_node = ?, updated_at = ? WHERE run_id = ? AND status = ?",
+        )
+        .bind(next_status.as_str())
+        .bind("human_review_gate")
+        .bind(&decided_at)
+        .bind(&run_id)
+        .bind(expected_status.as_str())
+        .execute(&mut *transaction)
+        .await?;
+        if update.rows_affected() != 1 {
+            return Err(RepositoryError::RunStateChanged);
+        }
+
+        let insert = sqlx::query(
+            "INSERT INTO approvals (approval_id, run_id, approval_json, decided_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(approval.approval_id.to_string())
+        .bind(&run_id)
+        .bind(approval_json)
+        .bind(&decided_at)
+        .execute(&mut *transaction)
+        .await;
+        if let Err(error) = insert {
+            if is_unique_violation(&error) {
+                return Err(RepositoryError::UniqueViolation);
+            }
+            return Err(RepositoryError::Database(error));
+        }
+
+        insert_generated_event(&mut transaction, event, &event_payload).await?;
+        transaction.commit().await?;
+        Ok(approval.clone())
+    }
+
+    pub async fn get_approval(&self, run_id: Uuid) -> Result<Option<Approval>, RepositoryError> {
+        let approval_json: Option<String> =
+            sqlx::query_scalar("SELECT approval_json FROM approvals WHERE run_id = ?")
+                .bind(run_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+        approval_json
+            .map(|value| serde_json::from_str(&value).map_err(invalid_stored_data))
+            .transpose()
+    }
+
+    pub async fn create_attestation_receipt(
+        &self,
+        receipt: &AttestationReceipt,
+        submitted_event: &RunEvent,
+        confirmed_event: &RunEvent,
+        expected_status: RunStatus,
+    ) -> Result<AttestationReceipt, RepositoryError> {
+        let receipt_json = serde_json::to_string(receipt).map_err(invalid_stored_data)?;
+        let submitted_payload =
+            serde_json::to_string(&submitted_event.payload).map_err(invalid_stored_data)?;
+        let confirmed_payload =
+            serde_json::to_string(&confirmed_event.payload).map_err(invalid_stored_data)?;
+        let run_id = receipt.run_id.to_string();
+        let mut transaction = self.pool.begin().await?;
+
+        let update = sqlx::query(
+            "UPDATE runs SET status = ?, current_node = ?, updated_at = ? WHERE run_id = ? AND status = ?",
+        )
+        .bind(RunStatus::Success.as_str())
+        .bind("attest_onchain")
+        .bind(format_timestamp(receipt.confirmed_at.unwrap_or(receipt.submitted_at)))
+        .bind(&run_id)
+        .bind(expected_status.as_str())
+        .execute(&mut *transaction)
+        .await?;
+        if update.rows_affected() != 1 {
+            return Err(RepositoryError::RunStateChanged);
+        }
+
+        let insert = sqlx::query(
+            "INSERT INTO attestation_receipts (attestation_id, run_id, receipt_json, submitted_at, confirmed_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(receipt.attestation_id.to_string())
+        .bind(&run_id)
+        .bind(receipt_json)
+        .bind(format_timestamp(receipt.submitted_at))
+        .bind(receipt.confirmed_at.map(format_timestamp))
+        .execute(&mut *transaction)
+        .await;
+        if let Err(error) = insert {
+            if is_unique_violation(&error) {
+                return Err(RepositoryError::UniqueViolation);
+            }
+            return Err(RepositoryError::Database(error));
+        }
+
+        insert_generated_event(&mut transaction, submitted_event, &submitted_payload).await?;
+        insert_generated_event(&mut transaction, confirmed_event, &confirmed_payload).await?;
+        transaction.commit().await?;
+        Ok(receipt.clone())
+    }
+
+    pub async fn claim_attestation_attempt(
+        &self,
+        run_id: Uuid,
+        approval_id: Uuid,
+        claimed_at: DateTime<Utc>,
+    ) -> Result<(), RepositoryError> {
+        let insert = sqlx::query(
+            "INSERT INTO attestation_attempts (run_id, approval_id, claimed_at) VALUES (?, ?, ?)",
+        )
+        .bind(run_id.to_string())
+        .bind(approval_id.to_string())
+        .bind(format_timestamp(claimed_at))
+        .execute(&self.pool)
+        .await;
+        match insert {
+            Ok(_) => Ok(()),
+            Err(error) if is_unique_violation(&error) => Err(RepositoryError::UniqueViolation),
+            Err(error) => Err(RepositoryError::Database(error)),
+        }
+    }
+
+    pub async fn get_attestation_receipt(
+        &self,
+        run_id: Uuid,
+    ) -> Result<Option<AttestationReceipt>, RepositoryError> {
+        let receipt_json: Option<String> =
+            sqlx::query_scalar("SELECT receipt_json FROM attestation_receipts WHERE run_id = ?")
+                .bind(run_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+        receipt_json
+            .map(|value| serde_json::from_str(&value).map_err(invalid_stored_data))
+            .transpose()
     }
 
     async fn load_full_tool(&self, row: ToolRow) -> Result<Tool, RepositoryError> {

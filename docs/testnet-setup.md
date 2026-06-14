@@ -64,6 +64,20 @@ Copy the `Deployed to` address from the successful receipt into
 `REGISTRY_CONTRACT`, then verify the address and transaction on the Sepolia
 explorer.
 
+## Attestation Submission Boundary
+
+The Dashboard records a Sepolia-specific approval first. A separate
+`POST /api/runs/{run_id}/attestation` action then asks the Rust Trust Core to:
+
+1. atomically claim the Run's single submission attempt;
+2. verify the connected RPC chain is Sepolia;
+3. sign and broadcast `recordPassport` through Alloy;
+4. wait for a successful receipt; and
+5. persist the independent immutable Attestation Receipt.
+
+The endpoint reads `RPC_URL` and `PRIVATE_KEY` only when called. A failed or
+interrupted attempt is never retried automatically; it returns to manual review.
+
 ## GitHub Actions Boundary
 
 The normal CI workflow does not need or receive testnet secrets. Any future

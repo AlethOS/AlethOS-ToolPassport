@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -23,6 +24,7 @@ from .fixtures import (
     make_mock_evidence,
     make_mock_gaps,
 )
+from .research import ResearchResult, Researcher
 from .llm import LLMConfig, LLMError, chat_structured_list
 from .state import CheckFinding, EvidenceEntry, GapEntry, GraphState, ResearchBudget
 
@@ -207,30 +209,70 @@ def hypothesis_builder_llm(state: GraphState) -> dict[str, Any]:
 
 
 def investigation_round(state: GraphState) -> dict[str, Any]:
-    """Run one investigation round: collect evidence, close some gaps.
+    """Run one investigation round: collect evidence from real web sources.
 
-    When a BackendClient is configured, each evidence item is persisted to
-    the Rust Trust Core API and the returned UUID replaces the mock ID.
-    On failure the node falls back to mock evidence transparently.
+    When the tool has a GitHub canonical URL, the researcher fetches the
+    repo page and README; for other HTTPS URLs it fetches the URL directly.
+    Fetched content is turned into unlinked evidence entries. Live mode never
+    falls back to mock evidence.
     """
     round_num = state.research_round
     checks = _profile_checks(state)
     all_check_ids = [c["check_id"] for c in checks]
-
-    # Generate mock evidence as the base (backend may replace IDs)
-    mock_evidence = make_mock_evidence(all_check_ids, round_num)
     now_iso = datetime.now(timezone.utc).isoformat()
+
+    # ── Try real network research (explicit mode) ──────────────────
+    live_research = state.research_mode == "live"
+    researcher: Researcher | None = None
+    real_sources: list[EvidenceEntry] = []
+    research_errors: list[str] = []
+    if live_research:
+        try:
+            researcher = Researcher()
+            real_sources = _fetch_real_sources(
+                researcher, state, round_num, now_iso
+            )
+        except Exception as exc:
+            logger.warning("Real research failed: %s", exc)
+            research_errors.append(f"live_research_failed:{exc}")
+        finally:
+            if researcher is not None:
+                try:
+                    researcher.close()
+                except Exception:
+                    pass
+
+    # Live research never falls back to mock evidence. A failed or empty live
+    # round remains visible as insufficient evidence.
+    if live_research:
+        base_evidence = real_sources
+        if not base_evidence and not research_errors:
+            research_errors.append("live_research_no_sources")
+    else:
+        base_evidence = make_mock_evidence(all_check_ids, round_num)
+
+    remaining_sources = max(
+        0,
+        state.research_budget.max_sources - state.research_budget.sources_used,
+    )
+    base_evidence = base_evidence[:remaining_sources]
+
+    if base_evidence and live_research:
+        logger.info("Investigation round %d: using %d real source(s)", round_num, len(base_evidence))
+    elif live_research:
+        logger.info("Investigation round %d: no real sources collected", round_num)
+    else:
+        logger.info("Investigation round %d: using mock evidence", round_num)
 
     backend = get_backend_client()
     persisted_evidence: list[EvidenceEntry] = []
 
-    for ev in mock_evidence:
+    for ev in base_evidence:
         if backend is None:
             persisted_evidence.append(ev)
             continue
 
         artifact_id: str | None = None
-        # If the mock evidence has an excerpt, upload it as an artifact first.
         snippet = ev.excerpt.encode("utf-8")
         artifact_result = backend.upload_artifact(
             state.run_id,
@@ -244,7 +286,7 @@ def investigation_round(state: GraphState) -> dict[str, Any]:
         evidence_payload: dict[str, Any] = {
             "evidence_schema_version": "0.2.0",
             "source_type": ev.source_type,
-            "source_url": f"https://example.com/mock/{ev.evidence_id}",
+            "source_url": ev.source_url,
             "source_revision": None,
             "title": ev.title,
             "excerpt": ev.excerpt,
@@ -257,10 +299,11 @@ def investigation_round(state: GraphState) -> dict[str, Any]:
 
         result = backend.create_evidence(state.run_id, evidence_payload)
         if result is not None:
-            # Replace mock entry with backend-verified entry (real UUIDs).
             persisted_evidence.append(EvidenceEntry.from_backend(result))
+        elif live_research:
+            research_errors.append(f"live_evidence_persistence_failed:{ev.source_url}")
         else:
-            logger.debug("Evidence persistence failed for %s, using mock", ev.evidence_id)
+            logger.debug("Mock evidence persistence failed for %s, using local", ev.evidence_id)
             persisted_evidence.append(ev)
 
     # Determine which gaps are now resolved (those supported by new evidence)
@@ -291,17 +334,83 @@ def investigation_round(state: GraphState) -> dict[str, Any]:
         "research_budget": budget,
         "evidence_board": list(state.evidence_board) + persisted_evidence,
         "open_gaps": updated_gaps,
+        "errors": list(state.errors) + research_errors,
     }
+
+
+def _fetch_real_sources(
+    researcher: Researcher,
+    state: GraphState,
+    round_num: int,
+    now_iso: str,
+) -> list[EvidenceEntry]:
+    """Fetch real web sources for the investigation round.
+
+    Returns a list of EvidenceEntry objects built from fetched pages.
+    Returns an empty list if no sources could be fetched.
+    """
+    entries: list[EvidenceEntry] = []
+
+    target_url = state.canonical_url or ""
+    tool_name = state.tool_name or state.tool_id or "unknown"
+
+    # Parse GitHub owner/repo from URL.
+    gh_match = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", target_url)
+    if gh_match:
+        owner, repo = gh_match.group(1), gh_match.group(2)
+        result = researcher.fetch_github_repo(owner, repo)
+    else:
+        # Generic URL fetch.
+        result = researcher.fetch_urls([target_url]) if target_url.startswith("https://") else \
+            ResearchResult()
+
+    if not result.pages:
+        logger.info("No real pages fetched; will fall back to mock")
+        return []
+
+    for idx, page in enumerate(result.pages):
+        summary = researcher.extract_summary(page, max_chars=2_000)
+        if not summary.strip():
+            continue
+
+        eid = f"real-r{round_num}-{idx}"
+        source_type = "github_readme" if "raw.githubusercontent.com" in page.url else "official_docs"
+        title = f"Real source: {tool_name} (round {round_num}, page {idx})"
+
+        entries.append(
+            EvidenceEntry(
+                evidence_id=eid,
+                source_type=source_type,
+                source_url=page.url,
+                title=title,
+                excerpt=summary,
+                retrieved_at=now_iso,
+                # Collection alone does not prove a check. A later validated
+                # mapping step must explicitly link this evidence.
+                supports=[],
+                contradicts=[],
+            )
+        )
+
+    if result.errors:
+        logger.warning("Research errors: %s", result.errors)
+
+    return entries
 
 
 def gap_analysis(state: GraphState) -> dict[str, Any]:
     """Analyze open gaps to decide whether to continue research or freeze."""
     open_count = sum(1 for g in state.open_gaps if not g.resolved)
     total_count = len(state.open_gaps)
-    budget_exhausted = state.research_round >= state.research_budget.max_rounds
+    round_budget_exhausted = state.research_round >= state.research_budget.max_rounds
+    source_budget_exhausted = (
+        state.research_budget.sources_used >= state.research_budget.max_sources
+    )
 
-    if budget_exhausted:
+    if round_budget_exhausted:
         stop_reason = f"max_rounds_reached ({state.research_budget.max_rounds})"
+    elif source_budget_exhausted:
+        stop_reason = f"max_sources_reached ({state.research_budget.max_sources})"
     elif open_count == 0:
         stop_reason = "all_gaps_resolved"
     elif open_count <= max(1, total_count // 4):
@@ -362,6 +471,7 @@ def freeze_evidence_board(state: GraphState) -> dict[str, Any]:
                 "claim_id": f"claim-e{idx}",
                 "check_id": ev.supports[0],
                 "statement": f"Evidence from {ev.title}",
+                "status": "supported",
                 "confidence": 0.7,
                 "supports": ev.supports,
                 "contradicts": ev.contradicts,
@@ -390,7 +500,7 @@ def freeze_evidence_board(state: GraphState) -> dict[str, Any]:
 
 
 def check_execution(state: GraphState) -> dict[str, Any]:
-    """Produce a CheckFinding for each profile check based on available evidence."""
+    """Produce proposed CheckFindings for each profile check."""
     checks = _profile_checks(state)
 
     # Build index: check_id → list of supporting evidence IDs
@@ -423,10 +533,16 @@ def check_execution(state: GraphState) -> dict[str, Any]:
             )
         )
 
-    # Optionally submit to backend.
-    updates: dict[str, Any] = {
+    return {
         "current_node": "check_execution",
         "check_findings": findings,
+    }
+
+
+def persist_check_results(state: GraphState) -> dict[str, Any]:
+    """Submit skeptic-reviewed findings to Rust for deterministic scoring."""
+    updates: dict[str, Any] = {
+        "current_node": "persist_check_results",
     }
 
     backend = get_backend_client()
@@ -434,7 +550,7 @@ def check_execution(state: GraphState) -> dict[str, Any]:
         return updates
 
     finding_submissions: list[dict[str, Any]] = []
-    for f in findings:
+    for f in state.check_findings:
         submission: dict[str, Any] = {
             "check_id": f.check_id,
             "finding": f.finding,
@@ -567,6 +683,7 @@ def passport_draft(state: GraphState) -> dict[str, Any]:
             {
                 "statement_id": f"cap-{f.check_id}",
                 "statement": f.rationale,
+                "status": "supported",
                 "evidence_ids": f.evidence_ids,
             }
             for f in state.check_findings
@@ -590,3 +707,14 @@ def passport_draft(state: GraphState) -> dict[str, Any]:
         updates["passport_sequence"] = prov.get("passport_sequence")
 
     return updates
+
+
+def human_review_gate(state: GraphState) -> dict[str, Any]:
+    """Pause backend-associated runs after provenance freeze for a human decision."""
+    if get_backend_client() is None:
+        return {"current_node": "human_review_gate", "phase": "done"}
+    return {
+        "current_node": "human_review_gate",
+        "phase": "waiting_approval",
+        "approval_status": "waiting",
+    }

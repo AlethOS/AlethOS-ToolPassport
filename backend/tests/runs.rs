@@ -176,20 +176,24 @@ async fn projects_approval_and_terminal_status_events() {
 
     let approval_resolved =
         append_event(&router, &run_id, "human_review_gate", "approval_resolved").await;
-    assert_eq!(approval_resolved.0, StatusCode::CREATED);
+    assert_error(
+        &approval_resolved,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
 
     let finished = append_event_with_payload(
         &router,
         &run_id,
         "finish",
         "run_status_changed",
-        json!({"status": "success"}),
+        json!({"status": "failed"}),
     )
     .await;
     assert_eq!(finished.0, StatusCode::CREATED);
 
     let details = get_run(&router, &run_id).await;
-    assert_eq!(details.1["run"]["status"], "success");
+    assert_eq!(details.1["run"]["status"], "failed");
     assert_eq!(details.1["run"]["current_node"], "finish");
 }
 
@@ -208,6 +212,11 @@ async fn rejects_trust_core_owned_and_invalid_status_events() {
 
     let forged_score = append_event(&router, &run_id, "orchestrator", "score_changed").await;
     assert_error(&forged_score, StatusCode::BAD_REQUEST, "invalid_request");
+
+    for event_type in ["attestation_submitted", "attestation_confirmed"] {
+        let forged = append_event(&router, &run_id, "orchestrator", event_type).await;
+        assert_error(&forged, StatusCode::BAD_REQUEST, "invalid_request");
+    }
 
     let invalid_status = append_event_with_payload(
         &router,
@@ -1152,4 +1161,19 @@ async fn sse_stream_endpoint_rejects_missing_run() {
         .expect("SSE request must complete");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn investigate_endpoint_rejects_missing_run_before_launching_process() {
+    let (router, _pool) = test_app().await;
+    let fake_id = Uuid::new_v4().to_string();
+    let (status, body) = send_json(
+        &router,
+        Method::POST,
+        &format!("/api/runs/{fake_id}/investigate"),
+        json!({}),
+    )
+    .await;
+
+    assert_error(&(status, body), StatusCode::NOT_FOUND, "run_not_found");
 }

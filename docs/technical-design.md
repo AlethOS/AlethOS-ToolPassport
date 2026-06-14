@@ -11,7 +11,7 @@
 | Target | 已确定的目标设计，仍需按迁移顺序实现 |
 | Future | MVP 后再评估，不属于当前契约 |
 
-截至 2026-06-13，机器可读权威包括共享运行时 v0.1 schema、Audit
+截至 2026-06-14，机器可读权威包括共享运行时 v0.1 schema、Audit
 Standard/Profile schema、历史 `0.2.0` 与评分绑定 `0.3.0` catalog、Tool Identity
 v0.1 schema、Artifact v0.1 schema、
 Evidence v0.2 create/stored schema，以及 Stage 6 的 Check Result submission/stored、
@@ -281,9 +281,9 @@ Run binding 和已保存 Evidence/Artifact 补全权威字段，规范化 set-li
 Rust-owned `evidence_board_frozen` 事件。`POST /api/runs/:run_id/check-results`
 要求引用已冻结 Board，并且 finding 只能引用该 Board 中的 Evidence；结果与
 Rust-owned `score_changed` 事件在同一事务中保存。通用 Event API 不允许伪造这两类
-Trust Core 事件。由于可信人工审批持久化尚未实现，API 当前不批准
-任何规则要求人工批准的 `not_applicable`；无副作用评分核心仍保留显式可信批准集合
-输入，供后续人工审批 API 接入。`POST /api/runs/:run_id/passport/freeze` 只接受
+Trust Core 事件。可信人工审批现已通过专用 API 持久化，但当前审批对象是冻结
+Passport provenance，不直接批准单个 `not_applicable`；无副作用评分核心仍保留显式
+可信批准集合输入，供后续 check 级审批接入。`POST /api/runs/:run_id/passport/freeze` 只接受
 不可信 Passport 内容（不含 Hash 或 Rust-owned scores）；Rust 从 Run binding、
 已冻结 Board/Manifest 和 Check Results 构建完整 Passport v0.2，通过 JCS + SHA-256
 计算 `passport_hash` 和 `evidence_manifest_hash`，从规范 Run UUID 字符串计算
@@ -333,7 +333,7 @@ flowchart TD
 
 ### 5.1 节点契约与使用规则
 
-所有节点必须有类型化输入和输出，在开始与结束时请求 Rust 追加事件，并把可复查结果保存为 Artifact。节点输出只包含决策摘要和结构化结果，不保存私有 chain-of-thought。失败必须产生可操作错误和明确路由。
+所有节点必须有类型化输入和输出，在开始与结束时请求 Rust 追加事件，并把可复查结果保存为 Artifact。当前 orchestrator 已统一封装节点生命周期：后端关联运行会在每个节点写入 `node_started`，写入适用的决策事件，并以 `node_finished` 或 `error` 收尾；任一必需事件持久化失败都会阻止图继续前进。节点输出只包含决策摘要和结构化结果，不保存私有 chain-of-thought。失败必须产生可操作错误和明确路由。
 
 | Node | 输入与职责 | 必须产出 | 使用规则与分支 |
 | --- | --- | --- | --- |
@@ -349,11 +349,12 @@ flowchart TD
 | `gap_analysis` | Evidence Board、Profile 和预算 | 按影响排序的 gaps、覆盖率和停止建议 | 优先高权重与高风险缺口；不得为低价值问题无限调研 |
 | `next_query_planning` | gaps 和已尝试查询 | 下一轮查询计划或停止理由 | 必须避免无变化重复查询；重复失败升级为人工决定或有限结论 |
 | `freeze_evidence_board` | 当前 Board、gaps 和范围 | 不可变 Board version 与冻结摘要 | 冻结后不能静默追加证据；继续调研创建新 Board version |
-| `check_execution` | 冻结 Board 和 Profile rules | 每个 check 的 finding、理由和 evidence IDs | GLM 可提出 finding，Rust 验证结构并执行确定性评分 |
+| `check_execution` | 冻结 Board 和 Profile rules | 每个 check 的候选 finding、理由和 evidence IDs | GLM 只提出 finding，不得在 skeptic review 前触发权威评分 |
 | `risk_register_builder` | Check findings 和权限 taxonomy | 风险、影响、缓解建议和人工检查项 | 文件、Shell、密钥、钱包、数据库写入和费用风险必须显式处理 |
 | `counter_evidence_search` | 高分 claims、高风险项和冲突 | 反证查询与结果 | 每个高风险权限至少一轮；不得仅搜索支持性材料 |
 | `consistency_review` | Board、findings、risk register 和草稿 | 无证据结论、冲突、遗漏和过度声明清单 | 发现问题时返回 mapping、checks 或 research，不直接掩盖问题 |
 | `score_calibration` | Findings、review issues 和规则 | 校准后的 finding 建议与评分变更理由 | 评分仍由 Rust 计算；弱证据、高冲突和未知边界不得获得高分 |
+| `persist_check_results` | skeptic review 后的 Findings 和冻结 Board | Rust-owned Check Results、总分和 rating | 仅在复核完成后向 Rust 提交；Rust 验证结构、证据归属并执行确定性评分 |
 | `passport_and_report_draft` | 冻结 Board、确定性分数和风险 | Passport draft 与 Markdown report | 报告只能引用已冻结数据，必须说明范围、缺口和非目标 |
 | `schema_validation` | 结构化草稿和版本化 schema | 验证结果与字段级错误 | 验证失败不得进入 Hash；错误进入有限修复 |
 | `repair_structured_output` | 验证错误和原始草稿 | 修复后的结构化草稿 | 最多两次；不得改变冻结证据或确定性分数 |
@@ -445,6 +446,12 @@ MVP 可以把节点组织为固定角色：Planner、Researcher、Evidence Analy
 ```
 
 Graph State 是 orchestrator 的编排状态，不是系统记录的替代品。重要事件、Evidence、Artifact、冻结版本、审批和最终 Hash 必须先写入 Rust。LangGraph checkpoint 用于恢复调度；Rust 数据用于恢复权威业务状态。
+
+当前受控调查入口使用 Run ID 作为 LangGraph `thread_id`，并把 checkpoint 写入
+`ORCHESTRATOR_CHECKPOINT_DB` 指定的 SQLite 数据库。live audit 启动时先查询该 Run
+是否已有 checkpoint：新 Run 使用初始状态，已有 Run 使用 `None` 从最后持久化步骤
+继续。SQLite checkpointer 使用严格 msgpack 反序列化模式；默认数据库位于本地
+`data/`，不包含权威业务记录。
 
 恢复规则：
 
@@ -671,6 +678,7 @@ web3/         Alloy client 和 Registry 调用
 | Implemented | `GET /api/tools` | 返回规范 Tool 列表 |
 | Implemented | `GET /api/tools/by-id?tool_id=...` | 返回 Tool 身份与别名；避免 namespaced ID 中的斜线破坏路径语义 |
 | Implemented | `POST /api/runs` | 原子创建 pending Run 和首个 `run_created` 事件；当前尚不启动 orchestrator；目标输入将增加可选 `audit_directives` 字段 |
+| Partial | `POST /api/runs/:run_id/investigate` | 在用户请求后启动或恢复仓库内受控 orchestrator 子进程；Run-bound SQLite checkpoint 与持久化生命周期已实现，重复并发启动防护和生产级进程监督仍待实现 |
 | Implemented | `GET /api/runs` | 返回 Run 列表 |
 | Implemented | `GET /api/runs/:run_id` | 返回 Run 和当前事件列表 |
 | Implemented | `POST /api/runs/:run_id/events` | 追加 v0.1 事件，并原子投影已验证的 Run 状态和当前节点 |
@@ -683,8 +691,10 @@ web3/         Alloy client 和 Registry 调用
 | Partial | `POST /api/runs/:run_id/check-results` | 从 Run 绑定与数据库 Evidence 验证 finding，计算并原子保存不可修改的分数和 `score_changed` 事件；需要人工批准的 N/A 当前关闭，且待冻结 Board 持久化后验证 board version |
 | Target | `POST /api/runs/:run_id/freeze` | 冻结 Board、provenance 和 Passport |
 | Target | `GET /api/passports/:passport_id` | 返回不可变 Passport |
-| Target | `POST /api/runs/:run_id/approval` | 保存绑定 Hash 的人工决定 |
-| Target | `POST /api/runs/:run_id/attest` | 在有效批准后提交测试网交易 |
+| Implemented | `POST /api/runs/:run_id/approval` | 原子保存绑定最新冻结 Hash 的不可变人工决定和 `approval_resolved` 事件 |
+| Implemented | `GET /api/runs/:run_id/approval` | 返回该 Run 的不可变人工决定 |
+| Implemented | `POST /api/runs/:run_id/attestation` | 在有效 Sepolia 批准后一次性占用提交资格，由 Rust/Alloy 广播并确认交易，再原子保存 Receipt、可信事件和成功状态；失败不自动重试 |
+| Implemented | `GET /api/runs/:run_id/attestation` | 返回独立于冻结 Passport 的不可变 Attestation Receipt |
 
 所有响应使用 JSON，SSE 除外。错误响应至少包含稳定 `code`、可读 `message` 和结构化 `details`。
 
@@ -704,7 +714,8 @@ evidence_boards
 check_results
 passports
 approvals
-attestations
+attestation_attempts
+attestation_receipts
 ```
 
 `tools` 保存规范身份，`tool_aliases` 保存受约束的发现入口；目标 `runs.tool_id` 必须引用 Tool，并冻结目标 revision 和审计时分类。事件、Evidence、Board、Check Result、Artifact、Passport、Approval 和 Attestation 关联 `run_id`，并可经 Run 回到 `tool_id`。事件只追加；冻结 Board 和 Passport 不允许原地修改；secrets 不进入任何表；migration 由 SQLx 管理。
@@ -731,12 +742,15 @@ Tool Index 按规范 Tool 聚合审计历史，允许用户查看同一工具的
 
 人工操作必须清楚区分“继续调研”“批准链下结果”“批准测试网 attestation”和“拒绝”。上链批准页面必须显示绑定的 Tool、Run、三个 Hash、chain ID 和 Registry 地址。
 
-当前 Dashboard 已实现只读 Trust Control Desk：通过同源 Next.js GET 代理读取 Rust
+当前 Dashboard 已实现 Trust Control Desk：通过同源 Next.js 代理读取 Rust
 `/health`、Run 列表与 Run 详情/Event，使用 TanStack Query 轮询并展示 loading、空、
-失败和 `waiting_approval` 状态。Overview、Findings、Evidence、Execution 与
-Provenance 中尚无后端权威契约的内容必须使用隔离 fixture，并在 UI 与 TypeScript
-类型中明确标记为 Preview。当前 Dashboard 不提供创建 Run、追加 Event、审批、签名
-或链上写入。
+失败和 `waiting_approval` 状态；还可解析或创建规范 GitHub Tool、创建 Run 并请求
+后端启动调查。Overview、Findings、Evidence、Execution 与 Provenance 只展示 Rust
+返回的权威数据；未产生 Check Results、冻结 Board 或冻结 Passport 时展示明确待生成
+状态，不回退到示例分数、findings、Hash 或 provenance。尚未实现的导航入口仍明确标记
+为 Preview。当前 Dashboard 可在 `waiting_approval` 状态记录链下批准、Sepolia
+attestation 批准或拒绝；在已有 Sepolia 批准后可请求 Rust 执行一次性提交，并展示
+独立 Receipt。私钥、链 ID 校验、签名、广播和确认均由 Rust/Alloy 负责。
 
 ## 12. 安全与外部访问边界
 
@@ -755,6 +769,11 @@ permissions:
 
 URL loader 必须限制协议、域名策略、响应大小、超时和重定向，并阻止访问本机、内网和云 metadata 地址。日志、事件、Evidence 和 Artifact 必须脱敏。orchestrator 子进程只获得必要环境变量。外部内容视为不可信数据，不能改变系统指令、Profile、预算或工具权限。用户审计指令作为可引导调查方向的受控输入，由 `intake_normalization` 验证后以结构化约束形式传递给下游节点；指令不能绕过安全边界或改变 Profile、预算和评分规则。
 
+真实网络调研使用 Run 冻结的规范 URL，不得从 mock fixture 推断目标。每次请求和每次
+重定向都必须重新执行 HTTPS、同源与私网地址检查。采集到网页只表示“来源已读取”，
+在经过结构化 claim/check 映射与验证前，其 `supports` / `contradicts` 必须保持为空；
+真实调研失败或来源预算耗尽时生成有限结论，不得静默回退为 mock Evidence。
+
 以下操作始终标记 `[HUMAN REQUIRED]`：提供 credentials；授权付费服务；选择有争议的审计政策；批准不受信来源；签名；部署；链上写入；以及决定是否接受证据不足的高风险结论。
 
 ## 13. 当前实现冲突与迁移计划
@@ -772,7 +791,7 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 | Passport 与评分 | 已发布严格 Passport v0.2、Check Result submission/stored、冻结 Board/Manifest 与 Provenance 契约，并实现 Rust 确定性评分核心、Run catalog 绑定、冻结 Board/Manifest、四个承诺 Hash 与 Passport/Provenance 冻结持久化/API | Partial；推理输入与 Rust-owned totals 已分离，可信 N/A 人工批准仍待实现 |
 | `web3_attestation` | 历史 v0.1 保留该字段；v0.2 已移除并发布独立 Receipt schema | Contract resolved；Receipt 持久化与测试网提交仍待 Stage 8 |
 | Audit Log Hash | 已实现按 sequence 序的 JCS+SHA-256 哈希链 | Resolved；`auditLogHash` 定义为 `provenance_frozen` 事件哈希，Stage 6 实现冻结边界 |
-| Dashboard | 已实现只读双语 Trust Control Desk、Run/Event 轮询和隔离 Preview 视图 | Partial；尚无 SSE、真实 Board/Score/Hash/Passport、写操作或 approval UI |
+| Dashboard | 已实现双语 Trust Control Desk、Run/Event 轮询、创建调查、真实冻结产物视图和绑定 provenance 的 approval UI | Partial；尚无签名或链上写入 |
 | Registry | 最小 commitment 合约和 Foundry tests 已实现 | Compatible；按 `toolId -> runId` 聚合，并保存三个 Hash、auditor 和 timestamp；链下 Tool Registry 仍待实现 |
 | README | 已准确标记当前未实现能力 | Compatible；实现每个迁移阶段后继续同步 |
 

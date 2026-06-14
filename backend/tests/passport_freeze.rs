@@ -155,6 +155,85 @@ async fn api_freezes_passport_with_stable_hashes_and_event() {
 }
 
 #[tokio::test]
+async fn approval_api_binds_latest_provenance_and_cannot_be_forged() {
+    let app = test_app().await;
+    let run_id = create_run(&app.router).await;
+    let evidence_id = create_evidence(&app.router, &run_id).await;
+    assert_eq!(
+        freeze_board(&app.router, &run_id, vec![json!(evidence_id)])
+            .await
+            .0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        post_results(&app.router, &run_id, &evidence_id).await.0,
+        StatusCode::CREATED
+    );
+    let freeze = freeze_passport(&app.router, &run_id, &evidence_id, None).await;
+    assert_eq!(freeze.0, StatusCode::CREATED);
+
+    for event_type in ["node_started", "node_finished", "approval_required"] {
+        let event = send_json(
+            &app.router,
+            Method::POST,
+            &format!("/api/runs/{run_id}/events"),
+            json!({"node_id": "human_review_gate", "event_type": event_type, "payload": {}}),
+        )
+        .await;
+        assert_eq!(event.0, StatusCode::CREATED);
+    }
+
+    let provenance = &freeze.1["provenance"];
+    let request = json!({
+        "approval_schema_version": "0.1.0",
+        "decision": "approve_testnet_attestation",
+        "passport_sequence": 1,
+        "passport_hash": provenance["passport_hash"],
+        "audit_log_hash": provenance["audit_log_hash"],
+        "evidence_manifest_hash": provenance["evidence_manifest_hash"],
+        "chain_id": 11155111,
+        "registry_contract": "0x1111111111111111111111111111111111111111"
+    });
+    let approved = send_json(
+        &app.router,
+        Method::POST,
+        &format!("/api/runs/{run_id}/approval"),
+        request.clone(),
+    )
+    .await;
+    assert_eq!(approved.0, StatusCode::CREATED);
+    assert_eq!(approved.1["decision"], "approve_testnet_attestation");
+
+    let fetched = send_json(
+        &app.router,
+        Method::GET,
+        &format!("/api/runs/{run_id}/approval"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(fetched.0, StatusCode::OK);
+    assert_eq!(fetched.1["passport_hash"], provenance["passport_hash"]);
+
+    let duplicate = send_json(
+        &app.router,
+        Method::POST,
+        &format!("/api/runs/{run_id}/approval"),
+        request,
+    )
+    .await;
+    assert_eq!(duplicate.0, StatusCode::CONFLICT);
+
+    let forged = send_json(
+        &app.router,
+        Method::POST,
+        &format!("/api/runs/{run_id}/events"),
+        json!({"node_id": "forged", "event_type": "approval_resolved", "payload": {}}),
+    )
+    .await;
+    assert_eq!(forged.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn get_passport_returns_the_frozen_result() {
     let app = test_app().await;
     let run_id = create_run(&app.router).await;
