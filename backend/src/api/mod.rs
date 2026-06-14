@@ -472,7 +472,7 @@ async fn launch_investigation(
     let checkpoint_db = std::env::var("ORCHESTRATOR_CHECKPOINT_DB")
         .unwrap_or_else(|_| "../data/orchestrator-checkpoints.sqlite".to_owned());
 
-    let mut cmd = std::process::Command::new(&python_cmd);
+    let mut cmd = tokio::process::Command::new(&python_cmd);
     cmd.arg("scripts/live_audit.py")
         .arg(&run.run.canonical_url)
         .env("BACKEND_URL", &backend_url)
@@ -485,14 +485,20 @@ async fn launch_investigation(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
-    let child = cmd.spawn().map_err(|error| {
+    let mut child = cmd.spawn().map_err(|error| {
         ServiceError::InvalidRequest(format!("failed to launch orchestrator: {error}"))
     })?;
+    let pid = child.id();
+    tokio::spawn(async move {
+        if let Err(error) = child.wait().await {
+            tracing::warn!(%error, "failed to reap orchestrator process");
+        }
+    });
 
     Ok(Json(serde_json::json!({
         "status": "launched",
         "mode": "start_or_resume",
         "run_id": run.run.run_id.to_string(),
-        "pid": child.id(),
+        "pid": pid,
     })))
 }

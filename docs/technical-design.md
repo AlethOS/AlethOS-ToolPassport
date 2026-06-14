@@ -678,7 +678,7 @@ web3/         Alloy client 和 Registry 调用
 | Implemented | `GET /api/tools` | 返回规范 Tool 列表 |
 | Implemented | `GET /api/tools/by-id?tool_id=...` | 返回 Tool 身份与别名；避免 namespaced ID 中的斜线破坏路径语义 |
 | Implemented | `POST /api/runs` | 原子创建 pending Run 和首个 `run_created` 事件；当前尚不启动 orchestrator；目标输入将增加可选 `audit_directives` 字段 |
-| Partial | `POST /api/runs/:run_id/investigate` | 在用户请求后启动或恢复仓库内受控 orchestrator 子进程；Run-bound SQLite checkpoint 与持久化生命周期已实现，重复并发启动防护和生产级进程监督仍待实现 |
+| Partial | `POST /api/runs/:run_id/investigate` | 在用户请求后启动或恢复仓库内受控 orchestrator 子进程；Run-bound SQLite checkpoint、持久化生命周期、退出进程回收和本地直启脚本已实现，重复并发启动防护和生产级进程监督仍待实现 |
 | Implemented | `GET /api/runs` | 返回 Run 列表 |
 | Implemented | `GET /api/runs/:run_id` | 返回 Run 和当前事件列表 |
 | Implemented | `POST /api/runs/:run_id/events` | 追加 v0.1 事件，并原子投影已验证的 Run 状态和当前节点 |

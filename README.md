@@ -32,15 +32,18 @@ wallet or chain operations.
 Run individual development services with:
 
 ```bash
-cd backend && cargo run
+scripts/run_backend_local.sh
 cd dashboard && npm run dev -- --hostname 127.0.0.1
 cd orchestrator && PYTHONPATH=src .venv/bin/python scripts/run_graph_demo.py
 ```
 
-The backend defaults to `sqlite://../data/toolpassport.db` when started from
-`backend/`; set `DATABASE_URL` to override it. It listens on
-`127.0.0.1:8080` by default; set `BIND_ADDR` to override it. SQLx runs embedded
-SQLite migrations on startup. The current Trust Core slice implements:
+The local backend script configures the repository orchestrator so Dashboard
+audit requests can start or resume long-running audits. It defaults to
+`data/toolpassport.db`, `runs/`, `data/orchestrator-checkpoints.sqlite`, and
+`127.0.0.1:8080`; all paths and the bind address are environment-overridable.
+It does not read `.env`; chain and optional service credentials must already be
+exported by the human operator. SQLx runs embedded SQLite migrations on startup.
+The current Trust Core slice implements:
 
 - `POST /api/runs` — create an audit run bound to an existing Tool (accepts `tool_id`)
 - `GET /api/runs`
