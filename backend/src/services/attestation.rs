@@ -74,8 +74,7 @@ impl AttestationSubmitter for AlloyAttestationSubmitter {
                 .get_balance(signer_address)
                 .await
                 .map_err(|error| AttestationError::Submission(error.to_string()))?;
-            let registry_address = Address::from_str(&registry_contract)
-                .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
+            let registry_address = parse_address("REGISTRY_CONTRACT", &registry_contract)?;
             let registry_code = provider
                 .get_code_at(registry_address)
                 .await
@@ -126,8 +125,8 @@ impl AttestationSubmitter for AlloyAttestationSubmitter {
                 });
             }
 
-            let address = Address::from_str(&commitment.registry_contract)
-                .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
+            let address =
+                parse_address("approved registry_contract", &commitment.registry_contract)?;
             let contract = ToolPassportRegistry::new(address, provider);
             let pending = contract
                 .recordPassport(
@@ -162,10 +161,10 @@ fn configured_provider()
     let registry_contract =
         std::env::var("REGISTRY_CONTRACT").map_err(|_| AttestationError::MissingConfiguration)?;
     let signer = PrivateKeySigner::from_str(&private_key)
-        .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
+        .map_err(|error| invalid_configuration("PRIVATE_KEY", error))?;
     let url = rpc_url
         .parse::<alloy::transports::http::reqwest::Url>()
-        .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
+        .map_err(|error| invalid_configuration("RPC_URL", error))?;
     let provider = ProviderBuilder::new()
         .wallet(signer.clone())
         .connect_http(url);
@@ -173,8 +172,15 @@ fn configured_provider()
 }
 
 fn parse_hash(field: &str, value: &str) -> Result<B256, AttestationError> {
-    B256::from_str(value)
-        .map_err(|error| AttestationError::InvalidConfiguration(format!("{field}: {error}")))
+    B256::from_str(value).map_err(|error| invalid_configuration(field, error))
+}
+
+fn parse_address(field: &str, value: &str) -> Result<Address, AttestationError> {
+    Address::from_str(value).map_err(|error| invalid_configuration(field, error))
+}
+
+fn invalid_configuration(field: &str, error: impl std::fmt::Display) -> AttestationError {
+    AttestationError::InvalidConfiguration(format!("{field}: {error}"))
 }
 
 fn ensure_registry_matches(configured: &str, approved: &str) -> Result<(), AttestationError> {
@@ -189,7 +195,7 @@ fn ensure_registry_matches(configured: &str, approved: &str) -> Result<(), Attes
 
 #[cfg(test)]
 mod tests {
-    use super::{AttestationError, ensure_registry_matches};
+    use super::{AttestationError, ensure_registry_matches, parse_address};
 
     #[test]
     fn approved_registry_must_match_runtime_configuration() {
@@ -207,5 +213,15 @@ mod tests {
             ),
             Err(AttestationError::InvalidConfiguration(_))
         ));
+    }
+
+    #[test]
+    fn invalid_registry_error_names_field_without_echoing_value() {
+        let invalid_value = "not-an-address";
+        let error = parse_address("REGISTRY_CONTRACT", invalid_value).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("REGISTRY_CONTRACT"));
+        assert!(!message.contains(invalid_value));
     }
 }

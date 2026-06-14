@@ -402,6 +402,7 @@ export function TrustControlDesk() {
               attestationError={attestationMutation.error?.message ?? null}
               submitAttestation={() => attestationMutation.mutate()}
               preflight={preflight}
+              preflightError={preflightQuery.error?.message ?? null}
             />
           </div>
         </main>
@@ -938,6 +939,7 @@ function TrustInspector({
   attestationError,
   submitAttestation,
   preflight,
+  preflightError,
 }: {
   t: (key: TranslationKey) => string;
   run: Run | null;
@@ -956,6 +958,7 @@ function TrustInspector({
   attestationError: string | null;
   submitAttestation: () => void;
   preflight: AttestationPreflight | null;
+  preflightError: string | null;
 }) {
   const [registryContract, setRegistryContract] = useState("");
   return (
@@ -1009,6 +1012,11 @@ function TrustInspector({
                   <Fact label={t("preflightIssues")} value={preflight.issues.join("; ")} />
                 )}
               </dl>
+            )}
+            {preflightError && (
+              <p className="text-danger">
+                {t("preflightUnavailable")}: {preflightError}
+              </p>
             )}
             <p>{run?.status === "waiting_approval" ? t("humanReviewRequired") : t("noHumanReview")}</p>
             {run?.status === "waiting_approval" && canApprove && (

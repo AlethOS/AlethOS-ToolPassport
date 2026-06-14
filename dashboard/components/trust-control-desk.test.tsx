@@ -311,6 +311,35 @@ describe("TrustControlDesk", () => {
     expect(screen.queryByText(/private_key|rpc_url/i)).not.toBeInTheDocument();
   });
 
+  it("shows a public preflight failure in the human review boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
+        if (path.endsWith("/attestation/preflight")) {
+          return response(
+            {
+              code: "attestation_submission_failed",
+              message: "invalid attestation chain configuration: REGISTRY_CONTRACT: invalid string length",
+              details: {},
+            },
+            502,
+          );
+        }
+        if (path === "/api/trust-core/runs") return response({ runs: [waitingRun] });
+        if (path.includes("/check-results") || path.includes("/evidence-board/") || path.includes("/passport/") || path.endsWith("/approval") || path.endsWith("/attestation")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: waitingRun, events });
+      }),
+    );
+
+    renderDesk();
+
+    expect(await screen.findByText(/Preflight unavailable/)).toHaveTextContent("REGISTRY_CONTRACT");
+  });
+
   it("filters authoritative run rows and selects a different run", async () => {
     mockTrustCore([waitingRun, runningRun], {
       [waitingRun.run_id]: { run: waitingRun, events },

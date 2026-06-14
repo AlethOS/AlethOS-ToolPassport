@@ -87,6 +87,10 @@ Container deployments must include system CA certificates because Alloy uses
 HTTPS RPC endpoints during preflight and submission. The repository runtime
 image installs Debian `ca-certificates`.
 
+Invalid runtime chain configuration fails closed. Error responses identify the
+invalid variable name without returning its value, and the Dashboard surfaces
+that public diagnostic in the human-review boundary.
+
 ## GitHub Actions Boundary
 
 The normal CI workflow does not need or receive testnet secrets. Any future
