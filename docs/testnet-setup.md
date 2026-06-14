@@ -64,6 +64,19 @@ Copy the `Deployed to` address from the successful receipt into
 `REGISTRY_CONTRACT`, then verify the address and transaction on the Sepolia
 explorer.
 
+### Reference Sepolia Deployment
+
+The minimal `ToolPassportRegistry` in this repository was deployed and confirmed
+on Sepolia on June 14, 2026:
+
+- Registry: `0x2761b873fd95bb8b1faf2ccbfd385a5e656ece8c`
+- Deployment transaction:
+  `0x5e74ea7e5bae0a57a6c3eec4155b37be6921ab896ef2cd8a8ff7899615c1669e`
+- Deployer: `0x6123DCD37ec779b2D571d674B24140889e038C05`
+
+Read-only verification confirmed deployed bytecode is present and the target
+audit Run had an initial `recordCount` of zero before attestation.
+
 ## Attestation Submission Boundary
 
 The Dashboard records a Sepolia-specific approval first. A separate
