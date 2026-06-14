@@ -11,21 +11,22 @@ use axum::{
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Approval, Artifact, CheckResults,
-        CheckResultsSubmission, CreateApprovalRequest, CreateArtifactRequest,
+        AddIdentifierRequest, AppendRunEventRequest, Approval, Artifact, AttestationReceipt,
+        CheckResults, CheckResultsSubmission, CreateApprovalRequest, CreateArtifactRequest,
         CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, EvidenceFreezeResult,
         FreezeEvidenceBoardRequest, FreezePassportRequest, PassportFreezeResult,
         ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
     },
     repository::Repository,
     services::{
-        DEFAULT_MAX_STORED_BYTES, EventBroadcaster, ServiceError, StorageService, TrustCoreService,
+        AlloyAttestationSubmitter, AttestationSubmitter, DEFAULT_MAX_STORED_BYTES,
+        EventBroadcaster, ServiceError, StorageService, TrustCoreService,
     },
 };
 
@@ -80,10 +81,23 @@ pub fn app(pool: SqlitePool) -> Router {
 }
 
 pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
+    app_with_storage_and_submitter(pool, storage, Arc::new(AlloyAttestationSubmitter))
+}
+
+pub fn app_with_storage_and_submitter(
+    pool: SqlitePool,
+    storage: StorageService,
+    attestation_submitter: Arc<dyn AttestationSubmitter>,
+) -> Router {
     let body_limit = storage.max_bytes() + 64 * 1024;
     let broadcaster = EventBroadcaster::new();
     let state = AppState {
-        service: TrustCoreService::new(Repository::new(pool), storage, broadcaster),
+        service: TrustCoreService::with_attestation_submitter(
+            Repository::new(pool),
+            storage,
+            broadcaster,
+            attestation_submitter,
+        ),
     };
 
     Router::new()
@@ -112,6 +126,10 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
         .route(
             "/api/runs/{run_id}/approval",
             post(create_approval).get(get_approval),
+        )
+        .route(
+            "/api/runs/{run_id}/attestation",
+            post(submit_attestation).get(get_attestation),
         )
         .route(
             "/api/runs/{run_id}/passport/{sequence}",
@@ -241,6 +259,21 @@ async fn get_approval(
     Path(run_id): Path<String>,
 ) -> ApiResult<Json<Approval>> {
     Ok(Json(state.service.get_approval(&run_id).await?))
+}
+
+async fn submit_attestation(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<(StatusCode, Json<AttestationReceipt>)> {
+    let receipt = state.service.submit_attestation(&run_id).await?;
+    Ok((StatusCode::CREATED, Json(receipt)))
+}
+
+async fn get_attestation(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<AttestationReceipt>> {
+    Ok(Json(state.service.get_attestation(&run_id).await?))
 }
 
 async fn create_tool(

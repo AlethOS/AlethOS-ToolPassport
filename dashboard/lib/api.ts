@@ -2,6 +2,7 @@ import type {
   ApiErrorBody,
   Approval,
   ApprovalDecision,
+  AttestationReceipt,
   ArtifactListResponse,
   CheckResults,
   EventListResponse,
@@ -77,6 +78,14 @@ export function getPassport(runId: string, sequence: number): Promise<PassportFr
   return getJson(
     `/api/trust-core/runs/${encodeURIComponent(runId)}/passport/${sequence}`,
   );
+}
+
+export function getApproval(runId: string): Promise<Approval> {
+  return getJson(`/api/trust-core/runs/${encodeURIComponent(runId)}/approval`);
+}
+
+export function getAttestation(runId: string): Promise<AttestationReceipt> {
+  return getJson(`/api/trust-core/runs/${encodeURIComponent(runId)}/attestation`);
 }
 
 // ── Write operations ────────────────────────────────────────────────
@@ -160,4 +169,8 @@ export function createApproval(
   },
 ): Promise<Approval> {
   return postJson(`/api/trust-core/runs/${encodeURIComponent(runId)}/approval`, request);
+}
+
+export function submitAttestation(runId: string): Promise<AttestationReceipt> {
+  return postJson(`/api/trust-core/runs/${encodeURIComponent(runId)}/attestation`, {});
 }

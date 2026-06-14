@@ -693,7 +693,8 @@ web3/         Alloy client 和 Registry 调用
 | Target | `GET /api/passports/:passport_id` | 返回不可变 Passport |
 | Implemented | `POST /api/runs/:run_id/approval` | 原子保存绑定最新冻结 Hash 的不可变人工决定和 `approval_resolved` 事件 |
 | Implemented | `GET /api/runs/:run_id/approval` | 返回该 Run 的不可变人工决定 |
-| Target | `POST /api/runs/:run_id/attest` | 在有效批准后提交测试网交易 |
+| Implemented | `POST /api/runs/:run_id/attestation` | 在有效 Sepolia 批准后一次性占用提交资格，由 Rust/Alloy 广播并确认交易，再原子保存 Receipt、可信事件和成功状态；失败不自动重试 |
+| Implemented | `GET /api/runs/:run_id/attestation` | 返回独立于冻结 Passport 的不可变 Attestation Receipt |
 
 所有响应使用 JSON，SSE 除外。错误响应至少包含稳定 `code`、可读 `message` 和结构化 `details`。
 
@@ -713,7 +714,8 @@ evidence_boards
 check_results
 passports
 approvals
-attestations
+attestation_attempts
+attestation_receipts
 ```
 
 `tools` 保存规范身份，`tool_aliases` 保存受约束的发现入口；目标 `runs.tool_id` 必须引用 Tool，并冻结目标 revision 和审计时分类。事件、Evidence、Board、Check Result、Artifact、Passport、Approval 和 Attestation 关联 `run_id`，并可经 Run 回到 `tool_id`。事件只追加；冻结 Board 和 Passport 不允许原地修改；secrets 不进入任何表；migration 由 SQLx 管理。
@@ -747,7 +749,8 @@ Tool Index 按规范 Tool 聚合审计历史，允许用户查看同一工具的
 返回的权威数据；未产生 Check Results、冻结 Board 或冻结 Passport 时展示明确待生成
 状态，不回退到示例分数、findings、Hash 或 provenance。尚未实现的导航入口仍明确标记
 为 Preview。当前 Dashboard 可在 `waiting_approval` 状态记录链下批准、Sepolia
-attestation 批准或拒绝；不提供签名或链上写入。
+attestation 批准或拒绝；在已有 Sepolia 批准后可请求 Rust 执行一次性提交，并展示
+独立 Receipt。私钥、链 ID 校验、签名、广播和确认均由 Rust/Alloy 负责。
 
 ## 12. 安全与外部访问边界
 

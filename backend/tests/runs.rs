@@ -213,6 +213,11 @@ async fn rejects_trust_core_owned_and_invalid_status_events() {
     let forged_score = append_event(&router, &run_id, "orchestrator", "score_changed").await;
     assert_error(&forged_score, StatusCode::BAD_REQUEST, "invalid_request");
 
+    for event_type in ["attestation_submitted", "attestation_confirmed"] {
+        let forged = append_event(&router, &run_id, "orchestrator", event_type).await;
+        assert_error(&forged, StatusCode::BAD_REQUEST, "invalid_request");
+    }
+
     let invalid_status = append_event_with_payload(
         &router,
         &run_id,

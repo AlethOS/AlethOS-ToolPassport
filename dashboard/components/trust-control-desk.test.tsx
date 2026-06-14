@@ -224,6 +224,59 @@ describe("TrustControlDesk", () => {
     });
   });
 
+  it("submits one approved Sepolia attestation and displays its receipt", async () => {
+    let submitted = false;
+    const receipt = {
+      attestation_receipt_schema_version: "0.1.0",
+      attestation_id: "879eaf72-bf3e-4268-bb99-23b840b4e9ed",
+      run_id: runningRun.run_id,
+      tool_id: runningRun.tool_id,
+      passport_hash: `0x${"1".repeat(64)}`,
+      audit_log_hash: `0x${"2".repeat(64)}`,
+      evidence_manifest_hash: `0x${"3".repeat(64)}`,
+      onchain_run_id: `0x${"4".repeat(64)}`,
+      chain_id: 11_155_111,
+      registry_contract: `0x${"b".repeat(40)}`,
+      status: "confirmed",
+      transaction_hash: `0x${"a".repeat(64)}`,
+      submitted_at: "2026-06-14T12:00:00Z",
+      confirmed_at: "2026-06-14T12:01:00Z",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
+        if (path === "/api/trust-core/runs") return response({ runs: [runningRun] });
+        if (path.endsWith("/approval")) {
+          return response({
+            approval_schema_version: "0.1.0",
+            decision: "approve_testnet_attestation",
+          });
+        }
+        if (path.endsWith("/attestation")) {
+          if (init?.method === "POST") {
+            submitted = true;
+            return response(receipt, 201);
+          }
+          return submitted
+            ? response(receipt)
+            : response({ code: "attestation_not_found", message: "not found", details: {} }, 404);
+        }
+        if (path.includes("/check-results") || path.includes("/evidence-board/") || path.includes("/passport/")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: runningRun, events: [] });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderDesk();
+    await user.click(await screen.findByRole("button", { name: "Submit Sepolia attestation" }));
+    expect(await screen.findByText(receipt.transaction_hash)).toBeInTheDocument();
+    expect(submitted).toBe(true);
+  });
+
   it("filters authoritative run rows and selects a different run", async () => {
     mockTrustCore([waitingRun, runningRun], {
       [waitingRun.run_id]: { run: waitingRun, events },

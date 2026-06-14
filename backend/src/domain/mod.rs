@@ -1,5 +1,6 @@
 mod approval;
 mod artifact;
+mod attestation;
 mod check_results;
 mod evidence;
 mod evidence_freeze;
@@ -11,6 +12,7 @@ mod tool_identity;
 
 pub use approval::{Approval, ApprovalDecision, CreateApprovalRequest};
 pub use artifact::{Artifact, CreateArtifactRequest};
+pub use attestation::{AttestationCommitment, AttestationReceipt, AttestationStatus};
 pub use check_results::{
     CheckResult, CheckResults, CheckResultsSubmission, DimensionScore, DimensionScores, Finding,
     FindingSubmission, Rating,

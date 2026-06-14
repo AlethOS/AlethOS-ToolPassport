@@ -328,6 +328,23 @@ export interface Approval {
   decided_at: string;
 }
 
+export interface AttestationReceipt {
+  attestation_receipt_schema_version: "0.1.0";
+  attestation_id: string;
+  run_id: string;
+  tool_id: string;
+  passport_hash: string;
+  audit_log_hash: string;
+  evidence_manifest_hash: string;
+  onchain_run_id: string;
+  chain_id: number;
+  registry_contract: string;
+  status: "submitted" | "confirmed" | "failed";
+  transaction_hash: string | null;
+  submitted_at: string;
+  confirmed_at: string | null;
+}
+
 // ── Events list ─────────────────────────────────────────────────────
 
 export interface EventListResponse {

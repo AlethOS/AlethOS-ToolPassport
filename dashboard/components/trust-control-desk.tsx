@@ -37,6 +37,8 @@ import {
   createApproval,
   createRun,
   createTool,
+  getApproval,
+  getAttestation,
   getEvidenceBoard,
   getHealth,
   getRunCheckResults,
@@ -45,11 +47,14 @@ import {
   getRuns,
   launchInvestigation,
   resolveTool,
+  submitAttestation,
 } from "@/lib/api";
 import { translate, type TranslationKey } from "@/lib/i18n";
 import type {
   CheckResults,
+  Approval,
   ApprovalDecision,
+  AttestationReceipt,
   DashboardTab,
   EvidenceFreezeResult,
   Locale,
@@ -234,6 +239,25 @@ export function TrustControlDesk() {
     enabled: Boolean(activeRunId && passportSequence),
   });
   const passportFreeze: PassportFreezeResult | null = passportQuery.data ?? null;
+  const approvalQuery = useQuery({
+    queryKey: ["approval", activeRunId],
+    queryFn: () => getApproval(activeRunId!),
+    enabled: Boolean(activeRunId),
+    refetchInterval: refreshInterval,
+  });
+  const approval: Approval | null = approvalQuery.data?.approval_schema_version === "0.1.0"
+    ? approvalQuery.data
+    : null;
+  const attestationQuery = useQuery({
+    queryKey: ["attestation", activeRunId],
+    queryFn: () => getAttestation(activeRunId!),
+    enabled: Boolean(activeRunId),
+    refetchInterval: refreshInterval,
+  });
+  const attestation: AttestationReceipt | null =
+    attestationQuery.data?.attestation_receipt_schema_version === "0.1.0"
+      ? attestationQuery.data
+      : null;
   const approvalMutation = useMutation({
     mutationFn: async ({ decision, registryContract }: { decision: ApprovalDecision; registryContract?: string }) => {
       if (!activeRunId || !passportFreeze) throw new Error("Frozen Passport provenance is required");
@@ -251,6 +275,18 @@ export function TrustControlDesk() {
     onSuccess: () => {
       void runsQuery.refetch();
       void detailsQuery.refetch();
+      void approvalQuery.refetch();
+    },
+  });
+  const attestationMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeRunId) throw new Error("Run is required");
+      return submitAttestation(activeRunId);
+    },
+    onSuccess: () => {
+      void runsQuery.refetch();
+      void detailsQuery.refetch();
+      void attestationQuery.refetch();
     },
   });
 
@@ -335,6 +371,7 @@ export function TrustControlDesk() {
               checkResults={checkResults}
               evidenceFreeze={evidenceFreeze}
               passportFreeze={passportFreeze}
+              attestation={attestation}
             />
             <TrustInspector
               t={t}
@@ -348,6 +385,11 @@ export function TrustControlDesk() {
               approvalPending={approvalMutation.isPending}
               approvalError={approvalMutation.error?.message ?? null}
               decide={(decision, registryContract) => approvalMutation.mutate({ decision, registryContract })}
+              approval={approval}
+              attestation={attestation}
+              attestationPending={attestationMutation.isPending}
+              attestationError={attestationMutation.error?.message ?? null}
+              submitAttestation={() => attestationMutation.mutate()}
             />
           </div>
         </main>
@@ -605,6 +647,7 @@ function ResultWorkspace({
   checkResults,
   evidenceFreeze,
   passportFreeze,
+  attestation,
 }: {
   t: (key: TranslationKey) => string;
   selectedRun: Run | null;
@@ -616,6 +659,7 @@ function ResultWorkspace({
   checkResults: CheckResults | null;
   evidenceFreeze: EvidenceFreezeResult | null;
   passportFreeze: PassportFreezeResult | null;
+  attestation: AttestationReceipt | null;
 }) {
   return (
     <section className="panel result-workspace">
@@ -648,7 +692,17 @@ function ResultWorkspace({
         {selectedRun && tab === "execution" && <ExecutionFlow currentNode={currentNode} t={t} />}
         {selectedRun && tab === "provenance" && (
           passportFreeze
-            ? <ProvenanceFlow t={t} authoritative />
+            ? (
+              <>
+                <ProvenanceFlow t={t} authoritative />
+                {attestation && (
+                  <section className="trust-boundary">
+                    <BadgeCheck size={14} />
+                    {t("attestationConfirmed")}: {attestation.transaction_hash}
+                  </section>
+                )}
+              </>
+            )
             : <StateMessage icon={Fingerprint} title={t("authoritativeDataPending")} detail={t("provenancePendingDetail")} />
         )}
       </div>
@@ -866,6 +920,11 @@ function TrustInspector({
   approvalPending,
   approvalError,
   decide,
+  approval,
+  attestation,
+  attestationPending,
+  attestationError,
+  submitAttestation,
 }: {
   t: (key: TranslationKey) => string;
   run: Run | null;
@@ -878,6 +937,11 @@ function TrustInspector({
   approvalPending: boolean;
   approvalError: string | null;
   decide: (decision: ApprovalDecision, registryContract?: string) => void;
+  approval: Approval | null;
+  attestation: AttestationReceipt | null;
+  attestationPending: boolean;
+  attestationError: string | null;
+  submitAttestation: () => void;
 }) {
   const [registryContract, setRegistryContract] = useState("");
   return (
@@ -929,6 +993,23 @@ function TrustInspector({
                 <button disabled={approvalPending} onClick={() => decide("reject")}>{t("rejectRun")}</button>
                 {approvalError && <p className="text-danger">{approvalError}</p>}
               </div>
+            )}
+            {approval?.decision === "approve_testnet_attestation" && !attestation && (
+              <div className="approval-actions">
+                <p>{t("attestationSubmitWarning")}</p>
+                <button disabled={attestationPending} onClick={submitAttestation}>
+                  {attestationPending ? t("submittingAttestation") : t("submitSepoliaAttestation")}
+                </button>
+                {attestationError && <p className="text-danger">{attestationError}</p>}
+              </div>
+            )}
+            {attestation && (
+              <dl className="run-facts">
+                <Fact label={t("attestationStatus")} value={attestation.status} />
+                <Fact label={t("transactionHash")} value={attestation.transaction_hash ?? "—"} />
+                <Fact label={t("registryContract")} value={attestation.registry_contract} />
+                <Fact label="Chain ID" value={attestation.chain_id.toString()} />
+              </dl>
             )}
             <button onClick={openFindings}>{t("openFindings")}<ChevronRight size={15} /></button>
           </section>

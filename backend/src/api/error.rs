@@ -129,6 +129,30 @@ impl From<ServiceError> for ApiError {
                 error.to_string(),
                 json!({}),
             ),
+            ServiceError::AttestationAlreadyExists => Self::new(
+                StatusCode::CONFLICT,
+                "attestation_already_exists",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::AttestationAttemptAlreadyExists => Self::new(
+                StatusCode::CONFLICT,
+                "attestation_attempt_already_exists",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::AttestationNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "attestation_not_found",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::AttestationSubmission(message) => Self::new(
+                StatusCode::BAD_GATEWAY,
+                "attestation_submission_failed",
+                message,
+                json!({}),
+            ),
             ServiceError::ToolNotFound => Self::new(
                 StatusCode::NOT_FOUND,
                 "tool_not_found",
