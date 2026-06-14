@@ -105,6 +105,18 @@ impl From<ServiceError> for ApiError {
                 error.to_string(),
                 json!({}),
             ),
+            ServiceError::PassportAlreadyFrozen => Self::new(
+                StatusCode::CONFLICT,
+                "passport_already_frozen",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::PassportNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "passport_not_found",
+                error.to_string(),
+                json!({}),
+            ),
             ServiceError::ToolNotFound => Self::new(
                 StatusCode::NOT_FOUND,
                 "tool_not_found",

@@ -7,15 +7,16 @@ use uuid::Uuid;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Artifact, CheckResults,
+        AddIdentifierRequest, AppendRunEventRequest, Artifact, AuditBinding, CheckResults,
         CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
         CreateToolRequest, Evidence, EvidenceFreezeResult, EvidenceManifestEntry,
-        ExternalIdentifier, FreezeEvidenceBoardRequest, FrozenEvidenceBoard,
-        FrozenEvidenceManifest, ReasonCode, ResolutionResponse, ResolutionStatus,
-        ResolveToolRequest, Run, RunDetails, RunEvent, RunEventType, RunStatus, Tool, ToolInput,
-        ZERO_HASH,
+        ExternalIdentifier, FreezeEvidenceBoardRequest, FreezePassportRequest, FrozenEvidenceBoard,
+        FrozenEvidenceManifest, Passport, PassportDimensionScores, PassportFreezeResult,
+        PassportRisk, PassportScores, PassportStatement, Provenance, ReasonCode, Recommendation,
+        ResolutionResponse, ResolutionStatus, ResolveToolRequest, Run, RunDetails, RunEvent,
+        RunEventType, RunStatus, Tool, ToolInput, ZERO_HASH,
     },
-    repository::{Repository, RepositoryError},
+    repository::{Repository, RepositoryError, canonical_sha256, sha256_hex},
 };
 
 mod normalizer;
@@ -43,6 +44,10 @@ pub enum ServiceError {
     EvidenceBoardAlreadyFrozen,
     #[error("evidence board version is not frozen")]
     EvidenceBoardNotFound,
+    #[error("passport sequence is already frozen")]
+    PassportAlreadyFrozen,
+    #[error("passport sequence is not frozen")]
+    PassportNotFound,
     #[error("tool not found")]
     ToolNotFound,
     #[error("invalid tool ID format")]
@@ -787,6 +792,157 @@ impl TrustCoreService {
             .await?
             .ok_or(ServiceError::EvidenceBoardNotFound)
     }
+
+    /// Build Passport v0.2 from a frozen Evidence Board, its Manifest, and the
+    /// stored Check Results; compute the four Rust-owned commitment hashes;
+    /// append the Trust-Core-owned `provenance_frozen` event (whose `event_hash`
+    /// becomes `audit_log_hash`); and persist the Passport + Provenance
+    /// immutably and atomically. No approval or onchain write occurs here.
+    pub async fn freeze_passport(
+        &self,
+        run_id: &str,
+        mut request: FreezePassportRequest,
+    ) -> Result<PassportFreezeResult, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        let run = self
+            .repository
+            .get_run(run_id)
+            .await?
+            .ok_or(ServiceError::RunNotFound)?;
+        validate_passport_header(&request)?;
+
+        let evidence_freeze = self
+            .repository
+            .get_evidence_freeze(run_id, request.evidence_board_version)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::InvalidRequest(format!(
+                    "evidence board version {} is not frozen",
+                    request.evidence_board_version
+                ))
+            })?;
+        let board_evidence_ids: HashSet<Uuid> = evidence_freeze
+            .evidence_board
+            .evidence_ids
+            .iter()
+            .copied()
+            .collect();
+
+        let check_results = self
+            .repository
+            .get_check_results(run_id, request.evidence_board_version)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::InvalidRequest(format!(
+                    "check results for evidence board version {} are not computed",
+                    request.evidence_board_version
+                ))
+            })?;
+        verify_binding_matches(&run.audit_binding, &check_results)?;
+
+        normalize_recommendation(&mut request.recommendation)?;
+        normalize_statements(
+            "capability_claims",
+            &mut request.capability_claims,
+            &board_evidence_ids,
+        )?;
+        normalize_statements("interfaces", &mut request.interfaces, &board_evidence_ids)?;
+        normalize_risks(&mut request.risks, &board_evidence_ids)?;
+        normalize_known_gaps(&mut request.known_gaps)?;
+        request
+            .capability_claims
+            .sort_by(|a, b| a.statement_id.cmp(&b.statement_id));
+        request
+            .interfaces
+            .sort_by(|a, b| a.statement_id.cmp(&b.statement_id));
+        request.risks.sort_by(|a, b| a.risk_id.cmp(&b.risk_id));
+
+        let target_revision = request
+            .target_revision
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let audit_scope = request.audit_scope.trim().to_owned();
+
+        let passport_sequence = self.repository.next_passport_sequence(run_id).await?;
+        let passport = Passport {
+            passport_version: "0.2.0".to_owned(),
+            passport_sequence,
+            tool_id: run.tool_id.clone(),
+            run_id,
+            tool_type: run.tool.tool_type.clone(),
+            target_revision,
+            audit_scope,
+            standard_id: run.audit_binding.standard_id.clone(),
+            standard_version: run.audit_binding.standard_version.clone(),
+            profile_id: run.audit_binding.profile_id.clone(),
+            profile_version: run.audit_binding.profile_version.clone(),
+            evidence_board_version: request.evidence_board_version,
+            check_results_id: check_results.check_results_id,
+            capability_claims: request.capability_claims,
+            interfaces: request.interfaces,
+            risks: request.risks,
+            known_gaps: request.known_gaps,
+            scores: passport_scores(&check_results),
+            recommendation: request.recommendation,
+        };
+
+        let passport_value = serialize_for_hash(&passport)?;
+        let passport_hash = canonical_sha256(&passport_value);
+
+        let manifest_value = serialize_for_hash(&evidence_freeze.evidence_manifest)?;
+        let evidence_manifest_hash = canonical_sha256(&manifest_value);
+
+        let onchain_run_id = sha256_hex(run_id.to_string().as_bytes());
+        let frozen_at = Utc::now();
+
+        let provenance = Provenance {
+            provenance_schema_version: "0.1.0".to_owned(),
+            run_id,
+            freeze_version: passport_sequence,
+            evidence_board_version: request.evidence_board_version,
+            passport_sequence,
+            passport_hash: passport_hash.clone(),
+            audit_log_hash: String::new(),
+            evidence_manifest_hash,
+            onchain_run_id,
+            frozen_at,
+        };
+
+        let event = generated_event(
+            run_id,
+            RunEventType::ProvenanceFrozen,
+            json!({
+                "evidence_board_version": request.evidence_board_version,
+                "freeze_version": passport_sequence,
+                "passport_hash": passport_hash,
+                "passport_sequence": passport_sequence,
+            }),
+        );
+
+        self.repository
+            .create_passport_freeze(&passport, provenance, &event)
+            .await
+            .map_err(|error| match error {
+                RepositoryError::UniqueViolation => ServiceError::PassportAlreadyFrozen,
+                other => ServiceError::Repository(other),
+            })
+    }
+
+    pub async fn get_passport_freeze(
+        &self,
+        run_id: &str,
+        sequence: u64,
+    ) -> Result<PassportFreezeResult, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        validate_passport_sequence(sequence)?;
+        ensure_run_exists(&self.repository, run_id).await?;
+        self.repository
+            .get_passport_freeze(run_id, sequence)
+            .await?
+            .ok_or(ServiceError::PassportNotFound)
+    }
 }
 
 struct EventProjection {
@@ -803,7 +959,8 @@ fn event_projection(
     match request.event_type {
         RunEventType::RunCreated
         | RunEventType::EvidenceBoardFrozen
-        | RunEventType::ScoreChanged => Err(ServiceError::InvalidRequest(format!(
+        | RunEventType::ScoreChanged
+        | RunEventType::ProvenanceFrozen => Err(ServiceError::InvalidRequest(format!(
             "{} is generated by the Rust trust core",
             request.event_type.as_str()
         ))),
@@ -1017,6 +1174,153 @@ fn normalize_evidence_references(
     }
     values.sort_unstable_by_key(Uuid::to_string);
     Ok(())
+}
+
+fn validate_passport_header(request: &FreezePassportRequest) -> Result<(), ServiceError> {
+    if request.passport_version != "0.2.0" {
+        return Err(ServiceError::InvalidRequest(
+            "passport_version must be 0.2.0".to_owned(),
+        ));
+    }
+    validate_evidence_board_version(request.evidence_board_version)?;
+    validate_non_empty("audit_scope", &request.audit_scope)
+}
+
+fn validate_passport_sequence(sequence: u64) -> Result<(), ServiceError> {
+    if sequence == 0 || sequence > i64::MAX as u64 {
+        Err(ServiceError::InvalidRequest(
+            "passport sequence must be between 1 and 9223372036854775807".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn verify_binding_matches(
+    audit_binding: &AuditBinding,
+    check_results: &CheckResults,
+) -> Result<(), ServiceError> {
+    let mismatched = audit_binding.standard_id != check_results.standard_id
+        || audit_binding.standard_version != check_results.standard_version
+        || audit_binding.profile_id != check_results.profile_id
+        || audit_binding.profile_version != check_results.profile_version;
+    if mismatched {
+        Err(ServiceError::InvalidRequest(
+            "check results binding does not match the run audit binding".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Project Check Results' object dimension scores into the integer dimension
+/// scores a Passport v0.2 document carries.
+fn passport_scores(check_results: &CheckResults) -> PassportScores {
+    let dimensions = check_results.dimension_scores.clone();
+    let d = &dimensions;
+    PassportScores {
+        dimensions: PassportDimensionScores {
+            capability_clarity: d.capability_clarity.score,
+            interface_openness: d.interface_openness.score,
+            automation_readiness: d.automation_readiness.score,
+            data_portability: d.data_portability.score,
+            permission_risk: d.permission_risk.score,
+            evidence_quality: d.evidence_quality.score,
+            ecosystem_fit: d.ecosystem_fit.score,
+        },
+        total_score: check_results.total_score,
+        rating: check_results.rating,
+    }
+}
+
+fn normalize_recommendation(recommendation: &mut Recommendation) -> Result<(), ServiceError> {
+    validate_non_empty("recommendation summary", &recommendation.summary)?;
+    recommendation.summary = recommendation.summary.trim().to_owned();
+    recommendation.conditions = recommendation
+        .conditions
+        .iter()
+        .map(|condition| condition.trim().to_owned())
+        .filter(|condition| !condition.is_empty())
+        .collect();
+    Ok(())
+}
+
+fn normalize_statements(
+    field: &str,
+    statements: &mut [PassportStatement],
+    board_evidence_ids: &HashSet<Uuid>,
+) -> Result<(), ServiceError> {
+    let mut seen = HashSet::new();
+    for statement in statements.iter_mut() {
+        validate_stable_id("statement_id", &statement.statement_id)?;
+        if !seen.insert(statement.statement_id.clone()) {
+            return Err(ServiceError::InvalidRequest(format!(
+                "{field} statement ID {} is duplicated",
+                statement.statement_id
+            )));
+        }
+        validate_non_empty("statement", &statement.statement)?;
+        normalize_evidence_references(
+            &statement.statement_id,
+            "evidence_ids",
+            &mut statement.evidence_ids,
+            board_evidence_ids,
+        )?;
+        statement.statement = statement.statement.trim().to_owned();
+    }
+    Ok(())
+}
+
+fn normalize_risks(
+    risks: &mut [PassportRisk],
+    board_evidence_ids: &HashSet<Uuid>,
+) -> Result<(), ServiceError> {
+    let mut seen = HashSet::new();
+    for risk in risks.iter_mut() {
+        validate_stable_id("risk_id", &risk.risk_id)?;
+        if !seen.insert(risk.risk_id.clone()) {
+            return Err(ServiceError::InvalidRequest(format!(
+                "risk ID {} is duplicated",
+                risk.risk_id
+            )));
+        }
+        validate_non_empty("risk title", &risk.title)?;
+        validate_non_empty("risk description", &risk.description)?;
+        normalize_evidence_references(
+            &risk.risk_id,
+            "evidence_ids",
+            &mut risk.evidence_ids,
+            board_evidence_ids,
+        )?;
+        risk.title = risk.title.trim().to_owned();
+        risk.description = risk.description.trim().to_owned();
+        if let Some(mitigation) = risk.mitigation.as_deref() {
+            if mitigation.trim().is_empty() {
+                return Err(ServiceError::InvalidRequest(format!(
+                    "risk {} mitigation must not be empty when present",
+                    risk.risk_id
+                )));
+            }
+            risk.mitigation = Some(mitigation.trim().to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn normalize_known_gaps(known_gaps: &mut Vec<String>) -> Result<(), ServiceError> {
+    let mut normalized = Vec::with_capacity(known_gaps.len());
+    for gap in known_gaps.iter() {
+        validate_non_empty("known gap", gap)?;
+        normalized.push(gap.trim().to_owned());
+    }
+    *known_gaps = normalized;
+    Ok(())
+}
+
+fn serialize_for_hash<T: serde::Serialize>(value: &T) -> Result<Value, ServiceError> {
+    serde_json::to_value(value).map_err(|error| {
+        ServiceError::Repository(RepositoryError::InvalidStoredData(error.to_string()))
+    })
 }
 
 fn validate_artifact_request(

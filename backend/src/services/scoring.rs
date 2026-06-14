@@ -249,7 +249,7 @@ pub fn score_check_results(
     }
 
     Ok(CheckResults {
-        check_results_schema_version: "0.1.0",
+        check_results_schema_version: "0.1.0".to_owned(),
         check_results_id: Uuid::new_v4(),
         run_id,
         evidence_board_version: submission.evidence_board_version,

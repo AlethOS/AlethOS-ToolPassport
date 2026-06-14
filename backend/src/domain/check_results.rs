@@ -42,7 +42,7 @@ pub struct CheckResultsSubmission {
     pub findings: Vec<FindingSubmission>,
 }
 
-#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Rating {
     NotRecommended,
@@ -75,7 +75,7 @@ impl Rating {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CheckResult {
     pub check_id: String,
     pub dimension: String,
@@ -91,14 +91,14 @@ pub struct CheckResult {
     pub applicable: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct DimensionScore {
     pub score: u8,
     pub earned_weighted_points: f64,
     pub applicable_weight: f64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct DimensionScores {
     pub capability_clarity: DimensionScore,
     pub interface_openness: DimensionScore,
@@ -136,9 +136,9 @@ impl DimensionScores {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CheckResults {
-    pub check_results_schema_version: &'static str,
+    pub check_results_schema_version: String,
     pub check_results_id: Uuid,
     pub run_id: Uuid,
     pub evidence_board_version: u64,

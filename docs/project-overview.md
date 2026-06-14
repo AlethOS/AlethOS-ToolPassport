@@ -209,7 +209,11 @@ Attestation Receipt 共享契约，并实现加载 Standard/Profile `0.3.0` 的 
 check 评分核心、Run 级审计 catalog 绑定，以及不可修改的 check-result 持久化/API；
 Rust 还会从同 Run 已保存 Evidence 构建并不可修改地保存规范化 Evidence Board 与
 canonical Evidence Manifest，原子追加 Trust Core-owned `evidence_board_frozen`
-事件，并要求评分引用已冻结 Board。Rust 已提供
+事件，并要求评分引用已冻结 Board；再从已冻结 Board/Manifest 与 Check Results 构建
+不可修改的 Passport v0.2，通过 JCS + SHA-256 计算四个 Rust-owned 承诺 Hash
+（passport_hash、audit_log_hash、evidence_manifest_hash、onchain_run_id），追加
+Trust Core-owned `provenance_frozen` 事件（其 event_hash 即为 audit_log_hash），
+并原子保存 Passport 与 Provenance。Rust 已提供
 Tool、Run、append-only Run Event、Evidence 和 Artifact API；Run 创建绑定规范
 `tool_id` 并冻结 Tool 快照。Artifact 使用受限 multipart 上传，Evidence 使用严格的
 规范化 JSON 契约；两者均由 Rust 分配 ID 与内部存储键、限制在配置的 Artifact

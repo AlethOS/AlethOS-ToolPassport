@@ -13,8 +13,9 @@ use uuid::Uuid;
 
 use crate::domain::{
     Artifact, AuditBinding, CheckResults, Evidence, EvidenceFreezeResult, EvidenceSourceType,
-    ExternalIdentifier, FrozenEvidenceBoard, FrozenEvidenceManifest, Run, RunEvent, RunEventType,
-    RunStatus, Tool, ToolInput, ToolType, ZERO_HASH,
+    ExternalIdentifier, FrozenEvidenceBoard, FrozenEvidenceManifest, Passport,
+    PassportFreezeResult, Provenance, Run, RunEvent, RunEventType, RunStatus, Tool, ToolInput,
+    ToolType, ZERO_HASH,
 };
 
 #[derive(Debug, Error)]
@@ -725,6 +726,141 @@ impl Repository {
         .transpose()
     }
 
+    /// Load the stored deterministic Check Results for a frozen Evidence Board
+    /// version. Used to source Rust-owned scores and `check_results_id` when
+    /// building a Passport.
+    pub async fn get_check_results(
+        &self,
+        run_id: Uuid,
+        evidence_board_version: u64,
+    ) -> Result<Option<CheckResults>, RepositoryError> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT result_json FROM check_results WHERE run_id = ? AND evidence_board_version = ?",
+        )
+        .bind(run_id.to_string())
+        .bind(evidence_board_version as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|(result_json,)| {
+            serde_json::from_str::<CheckResults>(&result_json).map_err(invalid_stored_data)
+        })
+        .transpose()
+    }
+
+    /// Next Passport sequence for a Run (1 if none exists yet). The unique
+    /// constraint on `(run_id, sequence)` is the backstop against concurrent
+    /// freezes selecting the same value.
+    pub async fn next_passport_sequence(&self, run_id: Uuid) -> Result<u64, RepositoryError> {
+        let row: Option<(Option<i64>,)> =
+            sqlx::query_as("SELECT MAX(sequence) FROM passports WHERE run_id = ?")
+                .bind(run_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row
+            .and_then(|(max_sequence,)| max_sequence)
+            .map(|max_sequence| max_sequence as u64 + 1)
+            .unwrap_or(1))
+    }
+
+    /// Atomically persist an immutable Passport, its Provenance record, and the
+    /// Trust-Core-owned `provenance_frozen` event. The event is appended first so
+    /// its computed `event_hash` can be stamped as `audit_log_hash` into the
+    /// Provenance before both rows are inserted. Any failure rolls back the
+    /// event, the Passport and the Provenance together.
+    pub async fn create_passport_freeze(
+        &self,
+        passport: &Passport,
+        mut provenance: Provenance,
+        event: &RunEvent,
+    ) -> Result<PassportFreezeResult, RepositoryError> {
+        let passport_json = serde_json::to_string(passport).map_err(invalid_stored_data)?;
+        let payload = serde_json::to_string(&event.payload).map_err(invalid_stored_data)?;
+        let mut transaction = self.pool.begin().await?;
+        let run_id_str = passport.run_id.to_string();
+        let sequence = passport.passport_sequence as i64;
+
+        provenance.audit_log_hash =
+            insert_generated_event(&mut transaction, event, &payload).await?;
+        let provenance_json = serde_json::to_string(&provenance).map_err(invalid_stored_data)?;
+
+        let passport_insert = sqlx::query(
+            r#"
+            INSERT INTO passports (run_id, sequence, passport_json, frozen_at)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(&run_id_str)
+        .bind(sequence)
+        .bind(&passport_json)
+        .bind(format_timestamp(provenance.frozen_at))
+        .execute(&mut *transaction)
+        .await;
+
+        if let Err(error) = passport_insert {
+            if is_unique_violation(&error) {
+                return Err(RepositoryError::UniqueViolation);
+            }
+            return Err(RepositoryError::Database(error));
+        }
+
+        let provenance_insert = sqlx::query(
+            r#"
+            INSERT INTO provenances (run_id, freeze_version, provenance_json)
+            VALUES (?, ?, ?)
+            "#,
+        )
+        .bind(&run_id_str)
+        .bind(sequence)
+        .bind(&provenance_json)
+        .execute(&mut *transaction)
+        .await;
+
+        if let Err(error) = provenance_insert {
+            if is_unique_violation(&error) {
+                return Err(RepositoryError::UniqueViolation);
+            }
+            return Err(RepositoryError::Database(error));
+        }
+
+        transaction.commit().await?;
+        Ok(PassportFreezeResult {
+            passport: passport.clone(),
+            provenance,
+        })
+    }
+
+    pub async fn get_passport_freeze(
+        &self,
+        run_id: Uuid,
+        sequence: u64,
+    ) -> Result<Option<PassportFreezeResult>, RepositoryError> {
+        let row: Option<(String, String)> = sqlx::query_as(
+            r#"
+            SELECT passport_json, provenance_json
+            FROM passports
+            JOIN provenances
+              ON provenances.run_id = passports.run_id
+             AND provenances.freeze_version = passports.sequence
+            WHERE passports.run_id = ? AND passports.sequence = ?
+            "#,
+        )
+        .bind(run_id.to_string())
+        .bind(sequence as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|(passport_json, provenance_json)| {
+            Ok(PassportFreezeResult {
+                passport: serde_json::from_str::<Passport>(&passport_json)
+                    .map_err(invalid_stored_data)?,
+                provenance: serde_json::from_str::<Provenance>(&provenance_json)
+                    .map_err(invalid_stored_data)?,
+            })
+        })
+        .transpose()
+    }
+
     async fn load_full_tool(&self, row: ToolRow) -> Result<Tool, RepositoryError> {
         let external_ids = sqlx::query_as::<_, ToolExternalIdRow>(
             r#"
@@ -886,10 +1022,24 @@ fn compute_event_hash(
         "created_at": created_at,
         "prev_event_hash": prev_event_hash,
     });
-    let canonical_bytes = serde_json_canonicalizer::to_string(&canonical_input)
-        .expect("JCS canonicalization must succeed for deterministic event hash");
+    canonical_sha256(&canonical_input)
+}
+
+/// SHA-256 over the RFC 8785 JCS canonicalization of a JSON value, returned as
+/// a `0x`-prefixed lowercase hex string. Used for every commitment hash that is
+/// taken over a JSON document (`event_hash`, `passportHash`, `evidenceManifestHash`).
+pub fn canonical_sha256(value: &Value) -> String {
+    let canonical_bytes = serde_json_canonicalizer::to_string(value)
+        .expect("JCS canonicalization must succeed for deterministic hash");
+    sha256_hex(canonical_bytes.as_bytes())
+}
+
+/// Raw SHA-256 over arbitrary bytes, returned as `0x`-prefixed lowercase hex.
+/// Used for the onchain `runId` commitment: SHA-256 of the lowercase Run UUID
+/// string.
+pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(canonical_bytes.as_bytes());
+    hasher.update(bytes);
     format!("0x{}", hex::encode(hasher.finalize()))
 }
 
@@ -1081,7 +1231,7 @@ async fn insert_generated_event(
     transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     event: &RunEvent,
     payload: &str,
-) -> Result<(), RepositoryError> {
+) -> Result<String, RepositoryError> {
     let run_id_str = event.run_id.to_string();
     let (next_seq, prev_event_hash) = next_sequence_and_prev_hash(transaction, &run_id_str).await;
     let created_at_str = format_timestamp(event.created_at);
@@ -1122,5 +1272,5 @@ async fn insert_generated_event(
         .execute(&mut **transaction)
         .await?;
 
-    Ok(())
+    Ok(event_hash)
 }

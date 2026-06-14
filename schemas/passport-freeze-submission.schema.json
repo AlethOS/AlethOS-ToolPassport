@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/passport-freeze-submission.schema.json",
+  "title": "Passport Freeze Submission",
+  "description": "Untrusted Passport v0.2 content submitted for Rust-owned freeze. Rust fills run_id, tool identity, the audit binding, passport_sequence, check_results_id, the deterministic scores, and every commitment hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "passport_version",
+    "evidence_board_version",
+    "target_revision",
+    "audit_scope",
+    "capability_claims",
+    "interfaces",
+    "risks",
+    "known_gaps",
+    "recommendation"
+  ],
+  "properties": {
+    "passport_version": {
+      "const": "0.2.0"
+    },
+    "evidence_board_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "target_revision": {
+      "type": ["string", "null"]
+    },
+    "audit_scope": {
+      "$ref": "#/$defs/non_empty_string"
+    },
+    "capability_claims": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/statement"
+      }
+    },
+    "interfaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/statement"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/risk"
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/non_empty_string"
+      }
+    },
+    "recommendation": {
+      "$ref": "#/$defs/recommendation"
+    }
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statement_id",
+        "statement",
+        "status",
+        "evidence_ids"
+      ],
+      "properties": {
+        "statement_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "statement": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "status": {
+          "enum": [
+            "supported",
+            "partially_supported",
+            "unsupported",
+            "contradicted",
+            "not_checked"
+          ]
+        },
+        "evidence_ids": {
+          "$ref": "#/$defs/evidence_ids"
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "risk_id",
+        "title",
+        "severity",
+        "description",
+        "mitigation",
+        "evidence_ids"
+      ],
+      "properties": {
+        "risk_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "title": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "mitigation": {
+          "type": ["string", "null"]
+        },
+        "evidence_ids": {
+          "$ref": "#/$defs/evidence_ids"
+        }
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "conditions"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/non_empty_string"
+          }
+        }
+      }
+    }
+  }
+}

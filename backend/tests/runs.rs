@@ -599,7 +599,6 @@ async fn decision_events_are_accepted() {
         "review_issue_found",
         "directives_accepted",
         "human_feedback_received",
-        "provenance_frozen",
     ];
 
     for event_type in decision_types {
@@ -642,6 +641,20 @@ async fn decision_events_are_accepted() {
     )
     .await;
     assert_error(&forged_freeze, StatusCode::BAD_REQUEST, "invalid_request");
+
+    let forged_provenance = append_event_with_payload(
+        &router,
+        &run_id,
+        "orchestrator",
+        "provenance_frozen",
+        json!({"passport_sequence": 1}),
+    )
+    .await;
+    assert_error(
+        &forged_provenance,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
 }
 
 #[tokio::test]

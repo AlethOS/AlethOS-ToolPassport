@@ -2,6 +2,7 @@ mod artifact;
 mod check_results;
 mod evidence;
 mod evidence_freeze;
+mod passport;
 mod run;
 mod run_event;
 mod tool;
@@ -17,6 +18,10 @@ pub use evidence_freeze::{
     ClaimStatus, EvidenceBoardClaim, EvidenceBoardGap, EvidenceFreezeResult, EvidenceManifestEntry,
     FreezeEvidenceBoardRequest, FrozenEvidenceBoard, FrozenEvidenceManifest, GapPriority,
     GapStatus,
+};
+pub use passport::{
+    FreezePassportRequest, Passport, PassportDimensionScores, PassportFreezeResult, PassportRisk,
+    PassportScores, PassportStatement, Provenance, Recommendation, Severity,
 };
 pub use run::{AuditBinding, CreateRunRequest, Run, RunDetails, RunStatus, ToolInput};
 pub use run_event::{AppendRunEventRequest, RunEvent, RunEventType, ZERO_HASH};

@@ -124,11 +124,16 @@ total score, and high-risk-capped rating. New Runs freeze their `0.3.0` audit
 catalog binding. Rust freezes normalized Evidence Boards and canonical
 Manifests from persisted same-Run Evidence, saves them immutably with a
 Trust-Core-owned `evidence_board_frozen` event, and requires that scoring
-reference an existing frozen Board. The check-result API saves immutable
-results and appends `score_changed` in one transaction. Because a trusted human
-approval API is not implemented yet, approval-required `not_applicable`
-findings remain closed. Passport freeze and commitment Hashes, the orchestrator
-subprocess, SSE, approval records, and onchain writes are not implemented yet.
+reference an existing frozen Board. Rust also builds immutable Passport v0.2
+documents from a frozen Board and Check Results, computes four deterministic
+commitment Hashes (passport_hash, audit_log_hash, evidence_manifest_hash,
+onchain_run_id) via JCS + SHA-256, appends a Trust-Core-owned
+`provenance_frozen` event whose `event_hash` becomes `audit_log_hash`, and
+persists Passport and Provenance atomically. The check-result API saves
+immutable results and appends `score_changed` in one transaction. Because a
+trusted human approval API is not implemented yet, approval-required
+`not_applicable` findings remain closed. The orchestrator subprocess, SSE,
+approval records, and onchain writes are not implemented yet.
 
 ## Docker
 
