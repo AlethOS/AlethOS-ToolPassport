@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/attestation-preflight.schema.json",
+  "title": "Attestation Preflight",
+  "description": "Public, non-secret readiness information derived by the Rust Trust Core.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "attestation_preflight_schema_version",
+    "ready",
+    "expected_chain_id",
+    "connected_chain_id",
+    "signer_address",
+    "signer_balance_wei",
+    "registry_contract",
+    "registry_code_present",
+    "issues"
+  ],
+  "properties": {
+    "attestation_preflight_schema_version": {
+      "const": "0.1.0"
+    },
+    "ready": {
+      "type": "boolean"
+    },
+    "expected_chain_id": {
+      "const": 11155111
+    },
+    "connected_chain_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "signer_address": {
+      "$ref": "#/$defs/address"
+    },
+    "signer_balance_wei": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "registry_contract": {
+      "$ref": "#/$defs/address"
+    },
+    "registry_code_present": {
+      "type": "boolean"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    }
+  }
+}

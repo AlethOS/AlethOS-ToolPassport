@@ -12,7 +12,9 @@ mod tool_identity;
 
 pub use approval::{Approval, ApprovalDecision, CreateApprovalRequest};
 pub use artifact::{Artifact, CreateArtifactRequest};
-pub use attestation::{AttestationCommitment, AttestationReceipt, AttestationStatus};
+pub use attestation::{
+    AttestationCommitment, AttestationPreflight, AttestationReceipt, AttestationStatus,
+};
 pub use check_results::{
     CheckResult, CheckResults, CheckResultsSubmission, DimensionScore, DimensionScores, Finding,
     FindingSubmission, Rating,

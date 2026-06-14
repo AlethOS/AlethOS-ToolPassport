@@ -2,6 +2,7 @@ import type {
   ApiErrorBody,
   Approval,
   ApprovalDecision,
+  AttestationPreflight,
   AttestationReceipt,
   ArtifactListResponse,
   CheckResults,
@@ -39,6 +40,10 @@ async function getJson<T>(path: string): Promise<T> {
 
 export function getHealth(): Promise<HealthResponse> {
   return getJson("/api/trust-core/health");
+}
+
+export function getAttestationPreflight(): Promise<AttestationPreflight> {
+  return getJson("/api/trust-core/attestation/preflight");
 }
 
 export function getRuns(): Promise<RunListResponse> {

@@ -107,9 +107,10 @@ The Dashboard now provides a responsive, bilingual Trust Control Desk built
 with Next.js, Tailwind CSS, TanStack Query, React Flow, and Lucide. It reads
 authoritative health, Run, and append-only Event data through read-only
 same-origin proxy routes. Audit results, Evidence Board, scores, commitments,
-execution graph, and provenance views are explicitly labeled Preview because
-their final Rust-backed contracts are not implemented yet. The Dashboard does
-not calculate scores or Hashes and exposes no approval or chain-write action.
+execution graph, provenance, human approval, public Sepolia readiness, and
+independent Attestation Receipt views use Rust-backed contracts. The Dashboard
+does not calculate scores or Hashes, handle private keys, or write directly to
+the chain; approved submissions are delegated to the Rust Trust Core.
 
 The minimal Foundry contract groups commitments by `toolId -> runId` and
 records a Passport Hash, Audit Log Hash, and Evidence Manifest Hash. Stage 5
@@ -131,9 +132,11 @@ onchain_run_id) via JCS + SHA-256, appends a Trust-Core-owned
 `provenance_frozen` event whose `event_hash` becomes `audit_log_hash`, and
 persists Passport and Provenance atomically. The check-result API saves
 immutable results and appends `score_changed` in one transaction. Because a
-trusted human approval API is not implemented yet, approval-required
-`not_applicable` findings remain closed. The orchestrator subprocess, SSE,
-approval records, and onchain writes are not implemented yet.
+trusted check-level N/A approval API is not implemented yet, approval-required
+`not_applicable` findings remain closed. Provenance-bound human decisions,
+one-attempt Alloy submission, public preflight, and independent immutable
+Attestation Receipt persistence are implemented. Durable worker supervision and
+production-grade event streaming are not implemented yet.
 
 ## Docker
 

@@ -17,11 +17,11 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Approval, Artifact, AttestationReceipt,
-        CheckResults, CheckResultsSubmission, CreateApprovalRequest, CreateArtifactRequest,
-        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, EvidenceFreezeResult,
-        FreezeEvidenceBoardRequest, FreezePassportRequest, PassportFreezeResult,
-        ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
+        AddIdentifierRequest, AppendRunEventRequest, Approval, Artifact, AttestationPreflight,
+        AttestationReceipt, CheckResults, CheckResultsSubmission, CreateApprovalRequest,
+        CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest, CreateToolRequest,
+        Evidence, EvidenceFreezeResult, FreezeEvidenceBoardRequest, FreezePassportRequest,
+        PassportFreezeResult, ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
     },
     repository::Repository,
     services::{
@@ -102,6 +102,7 @@ pub fn app_with_storage_and_submitter(
 
     Router::new()
         .route("/health", get(health))
+        .route("/api/attestation/preflight", get(attestation_preflight))
         .route("/api/runs", post(create_run).get(list_runs))
         .route("/api/runs/{run_id}", get(get_run))
         .route(
@@ -158,6 +159,12 @@ async fn health() -> Json<HealthResponse> {
         status: "ok",
         service: "toolpassport-backend",
     })
+}
+
+async fn attestation_preflight(
+    State(state): State<AppState>,
+) -> ApiResult<Json<AttestationPreflight>> {
+    Ok(Json(state.service.attestation_preflight().await?))
 }
 
 async fn create_run(

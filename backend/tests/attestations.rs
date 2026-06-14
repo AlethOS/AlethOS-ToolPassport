@@ -17,8 +17,8 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 use toolpassport_backend::{
-    AttestationCommitment, AttestationError, AttestationSubmitter, ChainSubmission, StorageService,
-    app_with_storage_and_submitter, migrate,
+    AttestationCommitment, AttestationError, AttestationPreflight, AttestationSubmitter,
+    ChainSubmission, StorageService, app_with_storage_and_submitter, migrate,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -41,6 +41,12 @@ struct FailingSubmitter {
 }
 
 impl AttestationSubmitter for FailingSubmitter {
+    fn preflight(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<AttestationPreflight, AttestationError>> + Send>> {
+        Box::pin(async { Err(AttestationError::MissingConfiguration) })
+    }
+
     fn submit(
         &self,
         _commitment: AttestationCommitment,
@@ -51,6 +57,24 @@ impl AttestationSubmitter for FailingSubmitter {
 }
 
 impl AttestationSubmitter for RecordingSubmitter {
+    fn preflight(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<AttestationPreflight, AttestationError>> + Send>> {
+        Box::pin(async {
+            Ok(AttestationPreflight {
+                attestation_preflight_schema_version: "0.1.0".to_owned(),
+                ready: true,
+                expected_chain_id: 11_155_111,
+                connected_chain_id: 11_155_111,
+                signer_address: "0xcccccccccccccccccccccccccccccccccccccccc".to_owned(),
+                signer_balance_wei: "1000000000000000".to_owned(),
+                registry_contract: CONTRACT.to_owned(),
+                registry_code_present: true,
+                issues: vec![],
+            })
+        })
+    }
+
     fn submit(
         &self,
         commitment: AttestationCommitment,
@@ -65,6 +89,21 @@ impl AttestationSubmitter for RecordingSubmitter {
             })
         })
     }
+}
+
+#[tokio::test]
+async fn exposes_only_public_attestation_preflight_values() {
+    let pool = test_pool().await;
+    let router = test_app(pool, Arc::new(RecordingSubmitter::default()));
+
+    let response = send(&router, Method::GET, "/api/attestation/preflight").await;
+
+    assert_eq!(response.0, StatusCode::OK);
+    assert_eq!(response.1["ready"], true);
+    assert_eq!(response.1["connected_chain_id"], 11_155_111);
+    assert_eq!(response.1["registry_contract"], CONTRACT);
+    assert!(response.1.get("rpc_url").is_none());
+    assert!(response.1.get("private_key").is_none());
 }
 
 #[tokio::test]

@@ -277,6 +277,40 @@ describe("TrustControlDesk", () => {
     expect(submitted).toBe(true);
   });
 
+  it("shows public Sepolia preflight readiness without exposing secrets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
+        if (path.endsWith("/attestation/preflight")) {
+          return response({
+            attestation_preflight_schema_version: "0.1.0",
+            ready: true,
+            expected_chain_id: 11_155_111,
+            connected_chain_id: 11_155_111,
+            signer_address: `0x${"c".repeat(40)}`,
+            signer_balance_wei: "1000000000000000",
+            registry_contract: `0x${"b".repeat(40)}`,
+            registry_code_present: true,
+            issues: [],
+          });
+        }
+        if (path === "/api/trust-core/runs") return response({ runs: [waitingRun] });
+        if (path.includes("/check-results") || path.includes("/evidence-board/") || path.includes("/passport/") || path.endsWith("/approval") || path.endsWith("/attestation")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: waitingRun, events });
+      }),
+    );
+
+    renderDesk();
+
+    expect(await screen.findByText("Attestation readiness")).toBeInTheDocument();
+    expect(screen.getByText(`0x${"c".repeat(40)}`)).toBeInTheDocument();
+    expect(screen.queryByText(/private_key|rpc_url/i)).not.toBeInTheDocument();
+  });
+
   it("filters authoritative run rows and selects a different run", async () => {
     mockTrustCore([waitingRun, runningRun], {
       [waitingRun.run_id]: { run: waitingRun, events },

@@ -77,6 +77,11 @@ The Dashboard records a Sepolia-specific approval first. A separate
 
 The endpoint reads `RPC_URL` and `PRIVATE_KEY` only when called. A failed or
 interrupted attempt is never retried automatically; it returns to manual review.
+Before approval, `GET /api/attestation/preflight` returns only public derived
+readiness fields: connected chain ID, signer address and balance, Registry
+address, deployed-code presence, and issues. It never returns the RPC URL or
+private key and never signs or broadcasts. The approved Registry must match the
+runtime `REGISTRY_CONTRACT`.
 
 ## GitHub Actions Boundary
 

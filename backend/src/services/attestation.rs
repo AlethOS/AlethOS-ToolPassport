@@ -8,7 +8,9 @@ use alloy::{
 };
 use thiserror::Error;
 
-use crate::domain::AttestationCommitment;
+use crate::domain::{AttestationCommitment, AttestationPreflight};
+
+const SEPOLIA_CHAIN_ID: u64 = 11_155_111;
 
 sol! {
     #[sol(rpc)]
@@ -31,7 +33,7 @@ pub struct ChainSubmission {
 
 #[derive(Debug, Error)]
 pub enum AttestationError {
-    #[error("RPC_URL and PRIVATE_KEY must be configured before submitting an attestation")]
+    #[error("RPC_URL, PRIVATE_KEY, and REGISTRY_CONTRACT must be configured for attestation")]
     MissingConfiguration,
     #[error("invalid attestation chain configuration: {0}")]
     InvalidConfiguration(String),
@@ -44,6 +46,10 @@ pub enum AttestationError {
 }
 
 pub trait AttestationSubmitter: Send + Sync {
+    fn preflight(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<AttestationPreflight, AttestationError>> + Send>>;
+
     fn submit(
         &self,
         commitment: AttestationCommitment,
@@ -54,21 +60,61 @@ pub trait AttestationSubmitter: Send + Sync {
 pub struct AlloyAttestationSubmitter;
 
 impl AttestationSubmitter for AlloyAttestationSubmitter {
+    fn preflight(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<AttestationPreflight, AttestationError>> + Send>> {
+        Box::pin(async move {
+            let (provider, signer, registry_contract) = configured_provider()?;
+            let connected_chain_id = provider
+                .get_chain_id()
+                .await
+                .map_err(|error| AttestationError::Submission(error.to_string()))?;
+            let signer_address = signer.address();
+            let signer_balance = provider
+                .get_balance(signer_address)
+                .await
+                .map_err(|error| AttestationError::Submission(error.to_string()))?;
+            let registry_address = Address::from_str(&registry_contract)
+                .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
+            let registry_code = provider
+                .get_code_at(registry_address)
+                .await
+                .map_err(|error| AttestationError::Submission(error.to_string()))?;
+            let registry_code_present = !registry_code.is_empty();
+            let mut issues = Vec::new();
+            if connected_chain_id != SEPOLIA_CHAIN_ID {
+                issues.push(format!(
+                    "connected chain ID {connected_chain_id} is not Sepolia {SEPOLIA_CHAIN_ID}"
+                ));
+            }
+            if signer_balance.is_zero() {
+                issues.push("signer has zero balance".to_owned());
+            }
+            if !registry_code_present {
+                issues.push("registry address has no deployed code".to_owned());
+            }
+
+            Ok(AttestationPreflight {
+                attestation_preflight_schema_version: "0.1.0".to_owned(),
+                ready: issues.is_empty(),
+                expected_chain_id: SEPOLIA_CHAIN_ID,
+                connected_chain_id,
+                signer_address: signer_address.to_string(),
+                signer_balance_wei: signer_balance.to_string(),
+                registry_contract,
+                registry_code_present,
+                issues,
+            })
+        })
+    }
+
     fn submit(
         &self,
         commitment: AttestationCommitment,
     ) -> Pin<Box<dyn Future<Output = Result<ChainSubmission, AttestationError>> + Send>> {
         Box::pin(async move {
-            let rpc_url =
-                std::env::var("RPC_URL").map_err(|_| AttestationError::MissingConfiguration)?;
-            let private_key =
-                std::env::var("PRIVATE_KEY").map_err(|_| AttestationError::MissingConfiguration)?;
-            let signer = PrivateKeySigner::from_str(&private_key)
-                .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
-            let url = rpc_url
-                .parse::<alloy::transports::http::reqwest::Url>()
-                .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
-            let provider = ProviderBuilder::new().wallet(signer).connect_http(url);
+            let (provider, _signer, configured_registry) = configured_provider()?;
+            ensure_registry_matches(&configured_registry, &commitment.registry_contract)?;
             let actual_chain = provider
                 .get_chain_id()
                 .await
@@ -108,7 +154,58 @@ impl AttestationSubmitter for AlloyAttestationSubmitter {
     }
 }
 
+fn configured_provider()
+-> Result<(impl Provider + Clone, PrivateKeySigner, String), AttestationError> {
+    let rpc_url = std::env::var("RPC_URL").map_err(|_| AttestationError::MissingConfiguration)?;
+    let private_key =
+        std::env::var("PRIVATE_KEY").map_err(|_| AttestationError::MissingConfiguration)?;
+    let registry_contract =
+        std::env::var("REGISTRY_CONTRACT").map_err(|_| AttestationError::MissingConfiguration)?;
+    let signer = PrivateKeySigner::from_str(&private_key)
+        .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
+    let url = rpc_url
+        .parse::<alloy::transports::http::reqwest::Url>()
+        .map_err(|error| AttestationError::InvalidConfiguration(error.to_string()))?;
+    let provider = ProviderBuilder::new()
+        .wallet(signer.clone())
+        .connect_http(url);
+    Ok((provider, signer, registry_contract))
+}
+
 fn parse_hash(field: &str, value: &str) -> Result<B256, AttestationError> {
     B256::from_str(value)
         .map_err(|error| AttestationError::InvalidConfiguration(format!("{field}: {error}")))
+}
+
+fn ensure_registry_matches(configured: &str, approved: &str) -> Result<(), AttestationError> {
+    if configured.eq_ignore_ascii_case(approved) {
+        Ok(())
+    } else {
+        Err(AttestationError::InvalidConfiguration(
+            "approved registry contract does not match REGISTRY_CONTRACT".to_owned(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AttestationError, ensure_registry_matches};
+
+    #[test]
+    fn approved_registry_must_match_runtime_configuration() {
+        assert!(
+            ensure_registry_matches(
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            ensure_registry_matches(
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+            Err(AttestationError::InvalidConfiguration(_))
+        ));
+    }
 }

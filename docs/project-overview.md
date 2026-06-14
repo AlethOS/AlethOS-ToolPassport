@@ -232,7 +232,9 @@ Rust 尚未生成相应冻结产物时只显示明确待生成状态。
 Dashboard 不计算权威评分或 Hash，也不提供未经 Rust 后端的审批或链上写入。当前可在
 冻结 provenance 后通过 Rust 专用 API 记录不可变链下批准、Sepolia attestation 批准
 或拒绝；Sepolia 批准后可通过独立操作请求 Rust/Alloy 执行一次性广播和确认，并读取
-不可变 Attestation Receipt。失败尝试不会自动重发。详细迁移顺序记录在
+不可变 Attestation Receipt。Rust 提供不暴露 RPC 或私钥的公开 preflight，核验
+Sepolia chain、Signer 余额和 Registry 代码；审批 Registry 必须匹配运行时配置。
+失败尝试不会自动重发。详细迁移顺序记录在
 `docs/technical-design.md`。
 
 真实网络调研入口正在集成。该模式只读取 Run 绑定的规范 HTTPS 来源，并将网页保存为

@@ -39,6 +39,7 @@ import {
   createTool,
   getApproval,
   getAttestation,
+  getAttestationPreflight,
   getEvidenceBoard,
   getHealth,
   getRunCheckResults,
@@ -54,6 +55,7 @@ import type {
   CheckResults,
   Approval,
   ApprovalDecision,
+  AttestationPreflight,
   AttestationReceipt,
   DashboardTab,
   EvidenceFreezeResult,
@@ -190,6 +192,15 @@ export function TrustControlDesk() {
   }, [locale]);
 
   const healthQuery = useQuery({ queryKey: ["trust-core-health"], queryFn: getHealth, refetchInterval: refreshInterval });
+  const preflightQuery = useQuery({
+    queryKey: ["attestation-preflight"],
+    queryFn: getAttestationPreflight,
+    refetchInterval: refreshInterval,
+  });
+  const preflight: AttestationPreflight | null =
+    preflightQuery.data?.attestation_preflight_schema_version === "0.1.0"
+      ? preflightQuery.data
+      : null;
   const runsQuery = useQuery({ queryKey: ["runs"], queryFn: getRuns, refetchInterval: refreshInterval });
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data?.runs]);
   const activeRunId = selectedRunId && runs.some((run) => run.run_id === selectedRunId) ? selectedRunId : runs[0]?.run_id ?? null;
@@ -390,6 +401,7 @@ export function TrustControlDesk() {
               attestationPending={attestationMutation.isPending}
               attestationError={attestationMutation.error?.message ?? null}
               submitAttestation={() => attestationMutation.mutate()}
+              preflight={preflight}
             />
           </div>
         </main>
@@ -925,6 +937,7 @@ function TrustInspector({
   attestationPending,
   attestationError,
   submitAttestation,
+  preflight,
 }: {
   t: (key: TranslationKey) => string;
   run: Run | null;
@@ -942,6 +955,7 @@ function TrustInspector({
   attestationPending: boolean;
   attestationError: string | null;
   submitAttestation: () => void;
+  preflight: AttestationPreflight | null;
 }) {
   const [registryContract, setRegistryContract] = useState("");
   return (
@@ -978,6 +992,24 @@ function TrustInspector({
           </section>
           <section className="inspector-section review-boundary">
             <h2><ShieldCheck size={16} />{t("humanReviewBoundary")}</h2>
+            {preflight && (
+              <dl className="run-facts">
+                <Fact
+                  label={t("attestationReadiness")}
+                  value={preflight.ready ? t("ready") : t("notReady")}
+                />
+                <Fact label="Chain ID" value={preflight.connected_chain_id.toString()} />
+                <Fact label={t("signerAddress")} value={preflight.signer_address} />
+                <Fact label={t("registryContract")} value={preflight.registry_contract} />
+                <Fact
+                  label={t("registryCode")}
+                  value={preflight.registry_code_present ? t("present") : t("missing")}
+                />
+                {preflight.issues.length > 0 && (
+                  <Fact label={t("preflightIssues")} value={preflight.issues.join("; ")} />
+                )}
+              </dl>
+            )}
             <p>{run?.status === "waiting_approval" ? t("humanReviewRequired") : t("noHumanReview")}</p>
             {run?.status === "waiting_approval" && canApprove && (
               <div className="approval-actions">
