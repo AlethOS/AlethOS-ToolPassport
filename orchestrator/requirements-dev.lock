@@ -5,6 +5,7 @@ attrs==26.1.0
 certifi==2026.5.20
 charset-normalizer==3.4.7
 h11==0.16.0
+hatchling==1.30.1
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.18
@@ -17,7 +18,7 @@ langchain-core==1.4.6
 langchain-protocol==0.0.16
 langgraph==1.2.4
 langgraph-checkpoint==4.1.1
-langgraph-checkpoint-sqlite==2.0.10
+langgraph-checkpoint-sqlite==3.1.0
 langgraph-prebuilt==1.1.0
 langgraph-sdk==0.4.2
 langsmith==0.8.15
@@ -41,6 +42,7 @@ rpds-py==2026.5.1
 ruff==0.15.17
 sqlite-vec==0.1.9
 tenacity==9.1.4
+trove-classifiers==2026.6.1.19
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.7.0

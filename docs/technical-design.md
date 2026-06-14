@@ -447,6 +447,12 @@ MVP 可以把节点组织为固定角色：Planner、Researcher、Evidence Analy
 
 Graph State 是 orchestrator 的编排状态，不是系统记录的替代品。重要事件、Evidence、Artifact、冻结版本、审批和最终 Hash 必须先写入 Rust。LangGraph checkpoint 用于恢复调度；Rust 数据用于恢复权威业务状态。
 
+当前受控调查入口使用 Run ID 作为 LangGraph `thread_id`，并把 checkpoint 写入
+`ORCHESTRATOR_CHECKPOINT_DB` 指定的 SQLite 数据库。live audit 启动时先查询该 Run
+是否已有 checkpoint：新 Run 使用初始状态，已有 Run 使用 `None` 从最后持久化步骤
+继续。SQLite checkpointer 使用严格 msgpack 反序列化模式；默认数据库位于本地
+`data/`，不包含权威业务记录。
+
 恢复规则：
 
 - 每个节点应可重入，外部写操作使用由 Rust 验证的 idempotency key；
@@ -672,7 +678,7 @@ web3/         Alloy client 和 Registry 调用
 | Implemented | `GET /api/tools` | 返回规范 Tool 列表 |
 | Implemented | `GET /api/tools/by-id?tool_id=...` | 返回 Tool 身份与别名；避免 namespaced ID 中的斜线破坏路径语义 |
 | Implemented | `POST /api/runs` | 原子创建 pending Run 和首个 `run_created` 事件；当前尚不启动 orchestrator；目标输入将增加可选 `audit_directives` 字段 |
-| Partial | `POST /api/runs/:run_id/investigate` | 在用户请求后启动仓库内受控 orchestrator 子进程；进程幂等、持久化生命周期和生产恢复仍待实现 |
+| Partial | `POST /api/runs/:run_id/investigate` | 在用户请求后启动或恢复仓库内受控 orchestrator 子进程；Run-bound SQLite checkpoint 与持久化生命周期已实现，重复并发启动防护和生产级进程监督仍待实现 |
 | Implemented | `GET /api/runs` | 返回 Run 列表 |
 | Implemented | `GET /api/runs/:run_id` | 返回 Run 和当前事件列表 |
 | Implemented | `POST /api/runs/:run_id/events` | 追加 v0.1 事件，并原子投影已验证的 Run 状态和当前节点 |

@@ -408,6 +408,8 @@ async fn launch_investigation(
     let orch_dir =
         std::env::var("ORCHESTRATOR_DIR").unwrap_or_else(|_| "../orchestrator".to_owned());
     let live_research = std::env::var("ORCHESTRATOR_LIVE_RESEARCH").unwrap_or_default();
+    let checkpoint_db = std::env::var("ORCHESTRATOR_CHECKPOINT_DB")
+        .unwrap_or_else(|_| "../data/orchestrator-checkpoints.sqlite".to_owned());
 
     let mut cmd = std::process::Command::new(&python_cmd);
     cmd.arg("scripts/live_audit.py")
@@ -416,6 +418,8 @@ async fn launch_investigation(
         .env("RUN_ID", run.run.run_id.to_string())
         .env("PYTHONPATH", "src")
         .env("ORCHESTRATOR_LIVE_RESEARCH", &live_research)
+        .env("CHECKPOINT_DB", &checkpoint_db)
+        .env("LANGGRAPH_STRICT_MSGPACK", "true")
         .current_dir(&orch_dir)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -426,6 +430,7 @@ async fn launch_investigation(
 
     Ok(Json(serde_json::json!({
         "status": "launched",
+        "mode": "start_or_resume",
         "run_id": run.run.run_id.to_string(),
         "pid": child.id(),
     })))

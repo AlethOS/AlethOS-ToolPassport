@@ -17,6 +17,11 @@ from typing import Any
 
 from toolpassport_orchestrator import GraphState, build_graph
 from toolpassport_orchestrator.backend_client import BackendClient, set_backend_client
+from toolpassport_orchestrator.checkpoint import (
+    checkpoint_config,
+    has_checkpoint,
+    sqlite_checkpointer,
+)
 from toolpassport_orchestrator.state import ResearchBudget
 
 
@@ -71,8 +76,13 @@ def main() -> None:
     print(f"max_rounds: {initial.research_budget.max_rounds}")
     print()
 
-    graph = build_graph()
-    result = GraphState.model_validate(graph.invoke(initial))
+    checkpoint_db = os.environ.get("CHECKPOINT_DB", "../data/orchestrator-checkpoints.sqlite")
+    config = checkpoint_config(run_id)
+    with sqlite_checkpointer(checkpoint_db) as checkpointer:
+        graph = build_graph(checkpointer=checkpointer)
+        resume = has_checkpoint(checkpointer, config)
+        print(f"checkpoint:    {checkpoint_db} ({'resume' if resume else 'new'})")
+        result = GraphState.model_validate(graph.invoke(None if resume else initial, config))
 
     print(f"phase:         {result.phase}")
     print(f"research_rounds: {result.research_round}")
