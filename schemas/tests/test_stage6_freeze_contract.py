@@ -45,10 +45,16 @@ class Stage6FreezeContractTests(unittest.TestCase):
             ROOT / "schemas" / "check-results-submission.schema.json"
         )
         self.results_schema = load_json(ROOT / "schemas" / "check-results.schema.json")
+        self.board_submission_schema = load_json(
+            ROOT / "schemas" / "evidence-board-freeze-submission.schema.json"
+        )
         self.board_schema = load_json(ROOT / "schemas" / "evidence-board.schema.json")
         self.manifest_schema = load_json(ROOT / "schemas" / "evidence-manifest.schema.json")
         self.passport_v01_schema = load_json(ROOT / "schemas" / "passport.schema.json")
         self.passport_schema = load_json(ROOT / "schemas" / "passport-v0.2.schema.json")
+        self.passport_submission_schema = load_json(
+            ROOT / "schemas" / "passport-freeze-submission.schema.json"
+        )
         self.provenance_schema = load_json(ROOT / "schemas" / "provenance.schema.json")
         self.receipt_schema = load_json(
             ROOT / "schemas" / "attestation-receipt.schema.json"
@@ -126,6 +132,19 @@ class Stage6FreezeContractTests(unittest.TestCase):
             "freeze_reason": "Research budget reached with reviewable gaps.",
             "frozen_at": "2026-06-13T00:00:01Z",
         }
+        self.board_submission = {
+            key: value
+            for key, value in self.board.items()
+            if key
+            not in {
+                "run_id",
+                "standard_id",
+                "standard_version",
+                "profile_id",
+                "profile_version",
+                "frozen_at",
+            }
+        }
         self.manifest = {
             "evidence_manifest_schema_version": "0.1.0",
             "run_id": RUN_ID,
@@ -177,6 +196,35 @@ class Stage6FreezeContractTests(unittest.TestCase):
                 "conditions": ["Validate recovery behavior."],
             },
         }
+        self.passport_submission = {
+            key: value
+            for key, value in self.passport.items()
+            if key
+            not in {
+                "passport_sequence",
+                "tool_id",
+                "run_id",
+                "tool_type",
+                "standard_id",
+                "standard_version",
+                "profile_id",
+                "profile_version",
+                "check_results_id",
+                "scores",
+            }
+        }
+        self.provenance = {
+            "provenance_schema_version": "0.1.0",
+            "run_id": RUN_ID,
+            "freeze_version": 1,
+            "evidence_board_version": 1,
+            "passport_sequence": 1,
+            "passport_hash": HASH_A,
+            "audit_log_hash": HASH_B,
+            "evidence_manifest_hash": HASH_C,
+            "onchain_run_id": HASH_D,
+            "frozen_at": "2026-06-13T00:00:02Z",
+        }
 
     def test_finding_submission_excludes_rust_owned_scores_and_hashes(self) -> None:
         self.assertEqual(
@@ -222,6 +270,36 @@ class Stage6FreezeContractTests(unittest.TestCase):
             "\n".join(validate_instance(payload, self.manifest_schema, "manifest")),
         )
 
+    def test_board_freeze_submission_excludes_rust_owned_fields(self) -> None:
+        self.assertEqual(
+            validate_instance(
+                self.board_submission,
+                self.board_submission_schema,
+                "board_submission",
+            ),
+            [],
+        )
+        for field in (
+            "run_id",
+            "standard_id",
+            "profile_id",
+            "frozen_at",
+            "evidence_manifest_hash",
+        ):
+            payload = copy.deepcopy(self.board_submission)
+            payload[field] = "caller-controlled"
+            with self.subTest(field=field):
+                self.assertIn(
+                    f"unexpected property '{field}'",
+                    "\n".join(
+                        validate_instance(
+                            payload,
+                            self.board_submission_schema,
+                            "board_submission",
+                        )
+                    ),
+                )
+
     def test_passport_v02_has_no_attestation_or_commitment_fields(self) -> None:
         self.assertEqual(
             validate_instance(self.passport, self.passport_schema, "passport"),
@@ -240,6 +318,56 @@ class Stage6FreezeContractTests(unittest.TestCase):
                     f"unexpected property '{field}'",
                     "\n".join(validate_instance(payload, self.passport_schema, "passport")),
                 )
+
+    def test_passport_freeze_submission_excludes_rust_owned_fields(self) -> None:
+        self.assertEqual(
+            validate_instance(
+                self.passport_submission,
+                self.passport_submission_schema,
+                "passport_submission",
+            ),
+            [],
+        )
+        for field in (
+            "run_id",
+            "tool_id",
+            "tool_type",
+            "passport_sequence",
+            "check_results_id",
+            "scores",
+            "passport_hash",
+            "audit_log_hash",
+        ):
+            payload = copy.deepcopy(self.passport_submission)
+            payload[field] = "caller-controlled"
+            with self.subTest(field=field):
+                self.assertIn(
+                    f"unexpected property '{field}'",
+                    "\n".join(
+                        validate_instance(
+                            payload,
+                            self.passport_submission_schema,
+                            "passport_submission",
+                        )
+                    ),
+                )
+
+    def test_provenance_carries_four_rust_owned_commitment_hashes(self) -> None:
+        self.assertEqual(
+            validate_instance(self.provenance, self.provenance_schema, "provenance"),
+            [],
+        )
+        payload = copy.deepcopy(self.provenance)
+        payload["audit_log_hash"] = "caller-controlled"
+        self.assertIn(
+            "does not match",
+            "\n".join(validate_instance(payload, self.provenance_schema, "provenance")),
+        )
+        del payload["onchain_run_id"]
+        self.assertIn(
+            "missing required property 'onchain_run_id'",
+            "\n".join(validate_instance(payload, self.provenance_schema, "provenance")),
+        )
 
     def test_passport_v01_remains_available_for_historical_reads(self) -> None:
         self.assertEqual(self.passport_v01_schema["properties"]["passport_version"]["const"], "0.1")

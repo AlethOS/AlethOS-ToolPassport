@@ -206,6 +206,9 @@ async fn rejects_trust_core_owned_and_invalid_status_events() {
         "invalid_request",
     );
 
+    let forged_score = append_event(&router, &run_id, "orchestrator", "score_changed").await;
+    assert_error(&forged_score, StatusCode::BAD_REQUEST, "invalid_request");
+
     let invalid_status = append_event_with_payload(
         &router,
         &run_id,
@@ -593,12 +596,9 @@ async fn decision_events_are_accepted() {
         "gap_detected",
         "evidence_linked",
         "claim_contradicted",
-        "evidence_board_frozen",
         "review_issue_found",
-        "score_changed",
         "directives_accepted",
         "human_feedback_received",
-        "provenance_frozen",
     ];
 
     for event_type in decision_types {
@@ -629,8 +629,32 @@ async fn decision_events_are_accepted() {
     let events = details.1["events"]
         .as_array()
         .expect("events must be an array");
-    // run_created + node_started + 13 decision events = 15
+    // run_created + node_started + externally accepted decision events
     assert_eq!(events.len(), 2 + decision_types.len());
+
+    let forged_freeze = append_event_with_payload(
+        &router,
+        &run_id,
+        "orchestrator",
+        "evidence_board_frozen",
+        json!({"evidence_board_version": 1}),
+    )
+    .await;
+    assert_error(&forged_freeze, StatusCode::BAD_REQUEST, "invalid_request");
+
+    let forged_provenance = append_event_with_payload(
+        &router,
+        &run_id,
+        "orchestrator",
+        "provenance_frozen",
+        json!({"passport_sequence": 1}),
+    )
+    .await;
+    assert_error(
+        &forged_provenance,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
 }
 
 #[tokio::test]

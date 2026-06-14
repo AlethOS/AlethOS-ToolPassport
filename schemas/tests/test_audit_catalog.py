@@ -15,11 +15,11 @@ from validate_audit_catalog import CatalogValidationError, load_json, validate_c
 
 class AuditCatalogValidationTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.standard = load_json(ROOT / "standards" / "alethos-toolpassport" / "0.2.0.json")
-        self.generic = load_json(ROOT / "profiles" / "generic" / "0.2.0.json")
-        self.agent_framework = load_json(ROOT / "profiles" / "agent_framework" / "0.2.0.json")
-        self.mcp_server = load_json(ROOT / "profiles" / "mcp_server" / "0.2.0.json")
-        self.cli_api_tool = load_json(ROOT / "profiles" / "cli_api_tool" / "0.2.0.json")
+        self.standard = load_json(ROOT / "standards" / "alethos-toolpassport" / "0.3.0.json")
+        self.generic = load_json(ROOT / "profiles" / "generic" / "0.3.0.json")
+        self.agent_framework = load_json(ROOT / "profiles" / "agent_framework" / "0.3.0.json")
+        self.mcp_server = load_json(ROOT / "profiles" / "mcp_server" / "0.3.0.json")
+        self.cli_api_tool = load_json(ROOT / "profiles" / "cli_api_tool" / "0.3.0.json")
 
     def validate(
         self,
@@ -59,12 +59,19 @@ class AuditCatalogValidationTests(unittest.TestCase):
 
     def test_committed_catalog_is_valid(self) -> None:
         validate_catalog(
-            [ROOT / "standards" / "alethos-toolpassport" / "0.2.0.json"],
+            [
+                ROOT / "standards" / "alethos-toolpassport" / "0.2.0.json",
+                ROOT / "standards" / "alethos-toolpassport" / "0.3.0.json",
+            ],
             [
                 ROOT / "profiles" / "generic" / "0.2.0.json",
                 ROOT / "profiles" / "agent_framework" / "0.2.0.json",
                 ROOT / "profiles" / "mcp_server" / "0.2.0.json",
                 ROOT / "profiles" / "cli_api_tool" / "0.2.0.json",
+                ROOT / "profiles" / "generic" / "0.3.0.json",
+                ROOT / "profiles" / "agent_framework" / "0.3.0.json",
+                ROOT / "profiles" / "mcp_server" / "0.3.0.json",
+                ROOT / "profiles" / "cli_api_tool" / "0.3.0.json",
             ],
         )
 
@@ -105,6 +112,30 @@ class AuditCatalogValidationTests(unittest.TestCase):
         standard = copy.deepcopy(self.standard)
         standard["standard_version"] = "v0.2"
         self.assert_invalid("does not match pattern", standard=standard)
+
+    def test_rating_thresholds_must_cover_all_ratings_in_order(self) -> None:
+        standard = copy.deepcopy(self.standard)
+        standard["rating_policy"]["thresholds"][2]["rating"] = "low_risk"
+        self.assert_invalid(
+            "rating thresholds must declare every rating in ascending order",
+            standard=standard,
+        )
+
+    def test_high_risk_caps_must_be_monotonic(self) -> None:
+        standard = copy.deepcopy(self.standard)
+        standard["rating_policy"]["high_risk_rating_caps"]["fail"] = "core_candidate"
+        self.assert_invalid(
+            "high-risk rating caps must become stricter",
+            standard=standard,
+        )
+
+    def test_new_standard_version_requires_rating_policy(self) -> None:
+        standard = copy.deepcopy(self.standard)
+        del standard["rating_policy"]
+        self.assert_invalid(
+            "rating_policy is required after standard version 0.2.0",
+            standard=standard,
+        )
 
     def test_duplicate_check_id_is_rejected(self) -> None:
         generic = copy.deepcopy(self.generic)

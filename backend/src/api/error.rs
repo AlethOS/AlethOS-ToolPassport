@@ -87,6 +87,36 @@ impl From<ServiceError> for ApiError {
                 message,
                 json!({}),
             ),
+            ServiceError::CheckResultsAlreadyExist => Self::new(
+                StatusCode::CONFLICT,
+                "check_results_already_exist",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::EvidenceBoardAlreadyFrozen => Self::new(
+                StatusCode::CONFLICT,
+                "evidence_board_already_frozen",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::EvidenceBoardNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "evidence_board_not_found",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::PassportAlreadyFrozen => Self::new(
+                StatusCode::CONFLICT,
+                "passport_already_frozen",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::PassportNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "passport_not_found",
+                error.to_string(),
+                json!({}),
+            ),
             ServiceError::ToolNotFound => Self::new(
                 StatusCode::NOT_FOUND,
                 "tool_not_found",

@@ -50,6 +50,7 @@ SQLite migrations on startup. The current Trust Core slice implements:
 - `GET /api/runs/:run_id/artifacts`
 - `POST /api/runs/:run_id/evidence` — persist one normalized Evidence JSON object
 - `GET /api/runs/:run_id/evidence`
+- `POST /api/runs/:run_id/check-results` — validate findings, score, and persist immutable results
 - `POST /api/tools` — create a tool candidate
 - `GET /api/tools` — list all tools
 - `GET /api/tools/by-id?tool_id=...` — get tool by namespaced ID
@@ -116,8 +117,23 @@ builds a deterministic JCS + SHA-256 hash chain over append-only Run Events.
 Stage 6 has published strict shared contracts for untrusted finding
 submissions, Rust-owned deterministic check results, frozen Evidence Boards
 and Manifests, Passport v0.2, Provenance, and an independent Attestation
-Receipt. Deterministic scoring, freeze persistence/API, the orchestrator
-subprocess, SSE, approval records, and onchain writes are not implemented yet.
+Receipt. The Rust scoring core loads the versioned `0.3.0` Standard/Profile
+catalog, rejects incomplete or unversioned findings and cross-Run Evidence
+references, and deterministically computes rule points, dimension scores,
+total score, and high-risk-capped rating. New Runs freeze their `0.3.0` audit
+catalog binding. Rust freezes normalized Evidence Boards and canonical
+Manifests from persisted same-Run Evidence, saves them immutably with a
+Trust-Core-owned `evidence_board_frozen` event, and requires that scoring
+reference an existing frozen Board. Rust also builds immutable Passport v0.2
+documents from a frozen Board and Check Results, computes four deterministic
+commitment Hashes (passport_hash, audit_log_hash, evidence_manifest_hash,
+onchain_run_id) via JCS + SHA-256, appends a Trust-Core-owned
+`provenance_frozen` event whose `event_hash` becomes `audit_log_hash`, and
+persists Passport and Provenance atomically. The check-result API saves
+immutable results and appends `score_changed` in one transaction. Because a
+trusted human approval API is not implemented yet, approval-required
+`not_applicable` findings remain closed. The orchestrator subprocess, SSE,
+approval records, and onchain writes are not implemented yet.
 
 ## Docker
 
@@ -178,6 +194,26 @@ prohibited.
 schema, and Markdown checks on every push and pull request. After the first
 push, protect `main` and require all CI jobs before merging.
 
-Deployment is intentionally not automated yet. Any future CD workflow must use
-a protected GitHub environment and retain explicit human approval for wallet
-signing, contract deployment, or onchain writes.
+## Application Deployment
+
+`.github/workflows/deploy.yml` deploys the application to an existing remote
+Git checkout over SSH. It checks out the requested ref in detached-HEAD mode
+and then runs `scripts/deploy.sh`, which checks and builds that exact revision
+before restarting the configured backend systemd service and Dashboard PM2
+process. The deploy script does not pull code, deploy contracts, sign, or write
+onchain.
+
+Configure the protected `aliyun-ecs` GitHub environment with these secrets:
+
+- `DEPLOY_HOST`: remote SSH host
+- `DEPLOY_USER`: remote SSH user
+- `DEPLOY_KEY`: remote SSH private key
+- `DEPLOY_PATH`: absolute path of the existing remote Git checkout
+
+The workflow can always be started manually with a branch, tag, or commit. To
+also trigger it after a successful `main` CI run, set the repository variable
+`AUTO_DEPLOY` to `true`. Keep required reviewers on the `aliyun-ecs`
+environment when application releases need explicit authorization. This
+workflow never performs wallet signing, contract deployment, or onchain writes;
+those operations require a separate protected workflow and explicit human
+approval.

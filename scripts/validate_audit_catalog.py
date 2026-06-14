@@ -180,6 +180,40 @@ def validate_catalog(standard_paths: list[Path], profile_paths: list[Path]) -> N
                     f"{path}: scoring rule {rule['scoring_rule_id']!r} must assign zero points to unknown"
                 )
 
+        rating_policy = standard.get("rating_policy")
+        if rating_policy is not None:
+            thresholds = rating_policy["thresholds"]
+            minimum_scores = [threshold["minimum_total_score"] for threshold in thresholds]
+            ratings = [threshold["rating"] for threshold in thresholds]
+            if minimum_scores[0] != 0:
+                errors.append(f"{path}: rating thresholds must start at zero")
+            if minimum_scores != sorted(set(minimum_scores)):
+                errors.append(f"{path}: rating thresholds must have unique ascending minimum scores")
+            expected_ratings = [
+                "not_recommended",
+                "manual_only",
+                "trial",
+                "low_risk",
+                "core_candidate",
+            ]
+            if ratings != expected_ratings:
+                errors.append(
+                    f"{path}: rating thresholds must declare every rating in ascending order"
+                )
+
+            rating_rank = {rating: index for index, rating in enumerate(expected_ratings)}
+            high_risk_caps = rating_policy["high_risk_rating_caps"]
+            if not (
+                rating_rank[high_risk_caps["fail"]]
+                <= rating_rank[high_risk_caps["unknown"]]
+                <= rating_rank[high_risk_caps["partial"]]
+            ):
+                errors.append(
+                    f"{path}: high-risk rating caps must become stricter from partial to unknown to fail"
+                )
+        elif standard["standard_version"] != "0.2.0":
+            errors.append(f"{path}: rating_policy is required after standard version 0.2.0")
+
     for path in profile_paths:
         profile = load_json(path)
         structural_errors = validate_instance(profile, profile_schema, str(path))
@@ -188,9 +222,9 @@ def validate_catalog(standard_paths: list[Path], profile_paths: list[Path]) -> N
             profiles.append((path, profile))
 
     profile_keys: set[tuple[str, str]] = set()
-    claimed_candidates: dict[str, str] = {}
-    claimed_check_ids: dict[str, str] = {}
-    fallback_profiles: list[str] = []
+    claimed_candidates: dict[tuple[str, str], str] = {}
+    claimed_check_ids: dict[tuple[str, str], str] = {}
+    fallback_profiles: dict[str, list[str]] = {}
 
     for path, profile in profiles:
         profile_key = (profile["profile_id"], profile["profile_version"])
@@ -214,13 +248,14 @@ def validate_catalog(standard_paths: list[Path], profile_paths: list[Path]) -> N
 
         for check in profile["checks"]:
             check_label = f"{path}: check {check['check_id']!r}"
-            check_owner = claimed_check_ids.get(check["check_id"])
+            check_key = (profile["profile_version"], check["check_id"])
+            check_owner = claimed_check_ids.get(check_key)
             if check_owner is not None:
                 errors.append(
                     f"{check_label} is already declared by profile {check_owner!r}"
                 )
             else:
-                claimed_check_ids[check["check_id"]] = profile["profile_id"]
+                claimed_check_ids[check_key] = profile["profile_id"]
             if check["dimension"] not in dimensions:
                 errors.append(f"{check_label} references unknown dimension {check['dimension']!r}")
             if check["scoring_rule_id"] not in scoring_rules:
@@ -237,7 +272,7 @@ def validate_catalog(standard_paths: list[Path], profile_paths: list[Path]) -> N
         if profile["profile_id"] not in selection["tool_type_candidates"]:
             errors.append(f"{path}: selection candidates must include the profile_id")
         if selection["fallback"]:
-            fallback_profiles.append(profile["profile_id"])
+            fallback_profiles.setdefault(profile["profile_version"], []).append(profile["profile_id"])
             if profile["profile_id"] != "generic":
                 errors.append(f"{path}: only the generic profile may be the fallback")
             if selection["minimum_confidence"] != 0:
@@ -246,16 +281,20 @@ def validate_catalog(standard_paths: list[Path], profile_paths: list[Path]) -> N
                 errors.append(f"{path}: fallback profile must declare scope limitations")
 
         for candidate in selection["tool_type_candidates"]:
-            owner = claimed_candidates.get(candidate)
+            candidate_key = (profile["profile_version"], candidate)
+            owner = claimed_candidates.get(candidate_key)
             if owner is not None:
                 errors.append(
                     f"{path}: tool type candidate {candidate!r} is already claimed by profile {owner!r}"
                 )
             else:
-                claimed_candidates[candidate] = profile["profile_id"]
+                claimed_candidates[candidate_key] = profile["profile_id"]
 
-    if fallback_profiles != ["generic"]:
-        errors.append("catalog must contain exactly one generic fallback profile")
+    for profile_version in sorted({profile["profile_version"] for _, profile in profiles}):
+        if fallback_profiles.get(profile_version) != ["generic"]:
+            errors.append(
+                f"catalog must contain exactly one generic fallback profile for version {profile_version}"
+            )
 
     if errors:
         raise CatalogValidationError(errors)

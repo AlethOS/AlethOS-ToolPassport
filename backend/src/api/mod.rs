@@ -12,9 +12,11 @@ use sqlx::SqlitePool;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Artifact, CreateArtifactRequest,
-        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, ResolveToolRequest,
-        Run, RunDetails, RunEvent, Tool,
+        AddIdentifierRequest, AppendRunEventRequest, Artifact, CheckResults,
+        CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
+        CreateToolRequest, Evidence, EvidenceFreezeResult, FreezeEvidenceBoardRequest,
+        FreezePassportRequest, PassportFreezeResult, ResolveToolRequest, Run, RunDetails, RunEvent,
+        Tool,
     },
     repository::Repository,
     services::{DEFAULT_MAX_STORED_BYTES, ServiceError, StorageService, TrustCoreService},
@@ -77,6 +79,23 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
         .route("/api/runs/{run_id}", get(get_run))
         .route("/api/runs/{run_id}/events", post(append_event))
         .route(
+            "/api/runs/{run_id}/check-results",
+            post(create_check_results),
+        )
+        .route(
+            "/api/runs/{run_id}/evidence-board/freeze",
+            post(freeze_evidence_board),
+        )
+        .route(
+            "/api/runs/{run_id}/evidence-board/{version}",
+            get(get_evidence_freeze),
+        )
+        .route("/api/runs/{run_id}/passport/freeze", post(freeze_passport))
+        .route(
+            "/api/runs/{run_id}/passport/{sequence}",
+            get(get_passport_freeze),
+        )
+        .route(
             "/api/runs/{run_id}/artifacts",
             post(upload_artifact).get(list_artifacts),
         )
@@ -131,6 +150,58 @@ async fn append_event(
     let Json(request) = payload.map_err(ApiError::invalid_json)?;
     let event = state.service.append_event(&run_id, request).await?;
     Ok((StatusCode::CREATED, Json(event)))
+}
+
+async fn create_check_results(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<CheckResultsSubmission>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<CheckResults>)> {
+    let Json(submission) = payload.map_err(ApiError::invalid_json)?;
+    let check_results = state
+        .service
+        .create_check_results(&run_id, submission)
+        .await?;
+    Ok((StatusCode::CREATED, Json(check_results)))
+}
+
+async fn freeze_evidence_board(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<FreezeEvidenceBoardRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<EvidenceFreezeResult>)> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let freeze = state
+        .service
+        .freeze_evidence_board(&run_id, request)
+        .await?;
+    Ok((StatusCode::CREATED, Json(freeze)))
+}
+
+async fn get_evidence_freeze(
+    State(state): State<AppState>,
+    Path((run_id, version)): Path<(String, u64)>,
+) -> ApiResult<Json<EvidenceFreezeResult>> {
+    let freeze = state.service.get_evidence_freeze(&run_id, version).await?;
+    Ok(Json(freeze))
+}
+
+async fn freeze_passport(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<FreezePassportRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<PassportFreezeResult>)> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let freeze = state.service.freeze_passport(&run_id, request).await?;
+    Ok((StatusCode::CREATED, Json(freeze)))
+}
+
+async fn get_passport_freeze(
+    State(state): State<AppState>,
+    Path((run_id, sequence)): Path<(String, u64)>,
+) -> ApiResult<Json<PassportFreezeResult>> {
+    let freeze = state.service.get_passport_freeze(&run_id, sequence).await?;
+    Ok(Json(freeze))
 }
 
 async fn create_tool(

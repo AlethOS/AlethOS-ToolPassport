@@ -1,0 +1,137 @@
+{
+  "profile_id": "cli_api_tool",
+  "profile_version": "0.3.0",
+  "standard_id": "alethos-toolpassport",
+  "standard_version": "0.3.0",
+  "title": "CLI and API Tool Profile",
+  "description": "Checks for tools exposed through command-line or API contracts with automated and external side effects.",
+  "selection": {
+    "tool_type_candidates": [
+      "cli_api_tool"
+    ],
+    "minimum_confidence": 0.75,
+    "fallback": false
+  },
+  "scope_limitations": [],
+  "checks": [
+    {
+      "check_id": "cli_api_tool.capability_scope",
+      "dimension": "capability_clarity",
+      "question": "Are supported operations, limitations, and non-goals documented?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "cli_api_tool.interface_contract",
+      "dimension": "interface_openness",
+      "question": "Are commands or endpoints, parameters, responses, and errors documented?",
+      "weight": 1.5,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "cli_api_tool.structured_output",
+      "dimension": "automation_readiness",
+      "question": "Does the tool expose stable machine-readable output for automated consumers?",
+      "weight": 1.25,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "cli_api_tool.headless_failure_contract",
+      "dimension": "automation_readiness",
+      "question": "Can the tool run headlessly with documented failures, retries, and timeout behavior?",
+      "weight": 1.25,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "cli_api_tool.export_path",
+      "dimension": "data_portability",
+      "question": "Can user data, configuration, and generated artifacts be exported in documented formats?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "cli_api_tool.credential_scope",
+      "dimension": "permission_risk",
+      "question": "Are authentication methods, credential scopes, storage, and revocation behavior documented and bounded?",
+      "weight": 2,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": true,
+      "scoring_rule_id": "bounded_risk_v1"
+    },
+    {
+      "check_id": "cli_api_tool.destructive_action_control",
+      "dimension": "permission_risk",
+      "question": "Are destructive or irreversible operations explicit and protected by controllable safeguards?",
+      "weight": 2,
+      "required_evidence_types": [
+        "official_docs",
+        "public_example"
+      ],
+      "high_risk": true,
+      "scoring_rule_id": "bounded_risk_v1"
+    },
+    {
+      "check_id": "cli_api_tool.paid_side_effect_control",
+      "dimension": "permission_risk",
+      "question": "Are billable operations, quotas, and cost-producing side effects explicit and controllable?",
+      "weight": 2,
+      "required_evidence_types": [
+        "official_docs",
+        "official_website"
+      ],
+      "high_risk": true,
+      "scoring_rule_id": "bounded_risk_v1"
+    },
+    {
+      "check_id": "cli_api_tool.claim_traceability",
+      "dimension": "evidence_quality",
+      "question": "Are important interface, behavior, and risk claims supported by reviewable evidence?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_readme"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    },
+    {
+      "check_id": "cli_api_tool.version_compatibility",
+      "dimension": "ecosystem_fit",
+      "question": "Are versioning, compatibility, deprecation, and migration expectations documented?",
+      "weight": 1,
+      "required_evidence_types": [
+        "official_docs",
+        "github_metadata"
+      ],
+      "high_risk": false,
+      "scoring_rule_id": "positive_capability_v1"
+    }
+  ]
+}
