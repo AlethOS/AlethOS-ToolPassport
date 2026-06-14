@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chrono::{TimeZone, Utc};
 use toolpassport_backend::{
     CheckResultsSubmission, Finding, FindingSubmission, Rating, ScoringError, ToolType,
-    score_check_results,
+    current_audit_binding, score_check_results,
 };
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ fn identical_inputs_produce_identical_aggregates_in_profile_order() {
 
     let first = score_check_results(
         Uuid::nil(),
-        ToolType::Generic,
+        &current_audit_binding(ToolType::Generic),
         submission.clone(),
         &HashSet::new(),
         &HashSet::new(),
@@ -33,7 +33,7 @@ fn identical_inputs_produce_identical_aggregates_in_profile_order() {
     .unwrap();
     let second = score_check_results(
         Uuid::nil(),
-        ToolType::Generic,
+        &current_audit_binding(ToolType::Generic),
         submission,
         &HashSet::new(),
         &HashSet::new(),
@@ -225,7 +225,7 @@ fn score(
 ) -> Result<toolpassport_backend::domain::CheckResults, ScoringError> {
     score_check_results(
         Uuid::nil(),
-        ToolType::Generic,
+        &current_audit_binding(ToolType::Generic),
         submission,
         evidence_ids,
         approvals,

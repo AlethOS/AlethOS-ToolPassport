@@ -206,7 +206,8 @@ Stage 1 Standard/Profile catalog、Stage 2 Tool Identity 与 Run binding、Stage
 决策事件与事件哈希链。Stage 6 已发布严格的 finding submission、Rust-owned check
 results、冻结 Evidence Board/Manifest、Passport v0.2、Provenance 和独立
 Attestation Receipt 共享契约，并实现加载 Standard/Profile `0.3.0` 的 Rust 确定性
-check 评分核心；冻结持久化和 check-result API 尚未实现。Rust 已提供
+check 评分核心、Run 级审计 catalog 绑定，以及不可修改的 check-result 持久化/API；
+冻结持久化尚未实现。Rust 已提供
 Tool、Run、append-only Run Event、Evidence 和 Artifact API；Run 创建绑定规范
 `tool_id` 并冻结 Tool 快照。Artifact 使用受限 multipart 上传，Evidence 使用严格的
 规范化 JSON 契约；两者均由 Rust 分配 ID 与内部存储键、限制在配置的 Artifact
@@ -218,8 +219,8 @@ Dashboard 已从开发 scaffold 升级为只读 Trust Control Desk：通过 Rust
 后端实现的评分、Findings、Evidence Board、commitment、执行图和 provenance 视图
 均明确标记为 Preview；Dashboard 不计算评分或 Hash，也不提供审批或链上写入。
 Stage 4 尚未把 orchestrator mock 接入 Evidence/Artifact API，也未提供 Artifact
-内容读取接口；check-level 评分 API/持久化、冻结 Passport、SSE、恢复、持久化审批
-记录和测试网提交仍属于计划能力。详细迁移顺序记录在
+内容读取接口；可信 N/A 人工批准、冻结 Passport、SSE、恢复、通用持久化审批记录和
+测试网提交仍属于计划能力。详细迁移顺序记录在
 `docs/technical-design.md`。
 
 ## 10. 设计参考与后续方向

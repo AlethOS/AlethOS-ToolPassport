@@ -4,6 +4,15 @@ use uuid::Uuid;
 
 use super::RunEvent;
 
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditBinding {
+    pub standard_id: String,
+    pub standard_version: String,
+    pub profile_id: String,
+    pub profile_version: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolInput {
@@ -63,6 +72,7 @@ pub struct Run {
     pub tool_id: String,
     pub canonical_url: String,
     pub tool: ToolInput,
+    pub audit_binding: AuditBinding,
     pub status: RunStatus,
     pub current_node: Option<String>,
     pub created_at: DateTime<Utc>,

@@ -50,6 +50,7 @@ SQLite migrations on startup. The current Trust Core slice implements:
 - `GET /api/runs/:run_id/artifacts`
 - `POST /api/runs/:run_id/evidence` — persist one normalized Evidence JSON object
 - `GET /api/runs/:run_id/evidence`
+- `POST /api/runs/:run_id/check-results` — validate findings, score, and persist immutable results
 - `POST /api/tools` — create a tool candidate
 - `GET /api/tools` — list all tools
 - `GET /api/tools/by-id?tool_id=...` — get tool by namespaced ID
@@ -119,9 +120,15 @@ and Manifests, Passport v0.2, Provenance, and an independent Attestation
 Receipt. The Rust scoring core loads the versioned `0.3.0` Standard/Profile
 catalog, rejects incomplete or unversioned findings and cross-Run Evidence
 references, and deterministically computes rule points, dimension scores,
-total score, and high-risk-capped rating. Check-result API/persistence, freeze
-behavior, the orchestrator subprocess, SSE, approval records, and onchain
-writes are not implemented yet.
+total score, and high-risk-capped rating. New Runs freeze their `0.3.0` audit
+catalog binding. The check-result API loads authoritative Evidence IDs, saves
+immutable results, and appends `score_changed` in one transaction. Because a
+trusted human approval API is not implemented yet, approval-required
+`not_applicable` findings remain closed. Frozen Evidence Board persistence is
+also not implemented yet, so the API currently validates same-Run Evidence but
+cannot yet prove that the submitted `evidence_board_version` exists as a frozen
+Board. Freeze behavior, the orchestrator subprocess, SSE, approval records,
+and onchain writes are not implemented yet.
 
 ## Docker
 

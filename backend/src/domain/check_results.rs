@@ -53,6 +53,16 @@ pub enum Rating {
 }
 
 impl Rating {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRecommended => "not_recommended",
+            Self::ManualOnly => "manual_only",
+            Self::Trial => "trial",
+            Self::LowRisk => "low_risk",
+            Self::CoreCandidate => "core_candidate",
+        }
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "not_recommended" => Some(Self::NotRecommended),

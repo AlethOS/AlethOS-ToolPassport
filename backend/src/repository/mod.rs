@@ -12,8 +12,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    Artifact, Evidence, EvidenceSourceType, ExternalIdentifier, Run, RunEvent, RunEventType,
-    RunStatus, Tool, ToolInput, ToolType, ZERO_HASH,
+    Artifact, AuditBinding, CheckResults, Evidence, EvidenceSourceType, ExternalIdentifier, Run,
+    RunEvent, RunEventType, RunStatus, Tool, ToolInput, ToolType, ZERO_HASH,
 };
 
 #[derive(Debug, Error)]
@@ -55,9 +55,10 @@ impl Repository {
             r#"
             INSERT INTO runs (
                 run_id, goal, tool_id, canonical_url, tool_name, tool_type,
-                tool_urls, status, current_node, created_at, updated_at
+                tool_urls, standard_id, standard_version, profile_id, profile_version,
+                status, current_node, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(run.run_id.to_string())
@@ -67,6 +68,10 @@ impl Repository {
         .bind(&run.tool.name)
         .bind(&run.tool.tool_type)
         .bind(tool_urls)
+        .bind(&run.audit_binding.standard_id)
+        .bind(&run.audit_binding.standard_version)
+        .bind(&run.audit_binding.profile_id)
+        .bind(&run.audit_binding.profile_version)
         .bind(run.status.as_str())
         .bind(&run.current_node)
         .bind(format_timestamp(run.created_at))
@@ -115,7 +120,8 @@ impl Repository {
         let rows = sqlx::query_as::<_, RunRow>(
             r#"
             SELECT run_id, goal, tool_id, canonical_url, tool_name, tool_type,
-                   tool_urls, status, current_node, created_at, updated_at
+                   tool_urls, standard_id, standard_version, profile_id, profile_version,
+                   status, current_node, created_at, updated_at
             FROM runs
             ORDER BY created_at DESC, run_id DESC
             "#,
@@ -130,7 +136,8 @@ impl Repository {
         let row = sqlx::query_as::<_, RunRow>(
             r#"
             SELECT run_id, goal, tool_id, canonical_url, tool_name, tool_type,
-                   tool_urls, status, current_node, created_at, updated_at
+                   tool_urls, standard_id, standard_version, profile_id, profile_version,
+                   status, current_node, created_at, updated_at
             FROM runs
             WHERE run_id = ?
             "#,
@@ -591,6 +598,50 @@ impl Repository {
         rows.into_iter().map(TryInto::try_into).collect()
     }
 
+    pub async fn create_check_results(
+        &self,
+        check_results: &CheckResults,
+        event: &RunEvent,
+    ) -> Result<CheckResults, RepositoryError> {
+        let result_json = serde_json::to_string(check_results).map_err(invalid_stored_data)?;
+        let payload = serde_json::to_string(&event.payload).map_err(invalid_stored_data)?;
+        let mut transaction = self.pool.begin().await?;
+
+        let result = sqlx::query(
+            r#"
+            INSERT INTO check_results (
+                check_results_id, run_id, evidence_board_version, standard_id, standard_version,
+                profile_id, profile_version, result_json, total_score, rating, computed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(check_results.check_results_id.to_string())
+        .bind(check_results.run_id.to_string())
+        .bind(check_results.evidence_board_version as i64)
+        .bind(&check_results.standard_id)
+        .bind(&check_results.standard_version)
+        .bind(&check_results.profile_id)
+        .bind(&check_results.profile_version)
+        .bind(result_json)
+        .bind(i64::from(check_results.total_score))
+        .bind(check_results.rating.as_str())
+        .bind(format_timestamp(check_results.computed_at))
+        .execute(&mut *transaction)
+        .await;
+
+        if let Err(error) = result {
+            if is_unique_violation(&error) {
+                return Err(RepositoryError::UniqueViolation);
+            }
+            return Err(RepositoryError::Database(error));
+        }
+
+        insert_generated_event(&mut transaction, event, &payload).await?;
+        transaction.commit().await?;
+        Ok(check_results.clone())
+    }
+
     async fn load_full_tool(&self, row: ToolRow) -> Result<Tool, RepositoryError> {
         let external_ids = sqlx::query_as::<_, ToolExternalIdRow>(
             r#"
@@ -649,6 +700,10 @@ struct RunRow {
     tool_name: String,
     tool_type: String,
     tool_urls: String,
+    standard_id: String,
+    standard_version: String,
+    profile_id: String,
+    profile_version: String,
     status: String,
     current_node: Option<String>,
     created_at: String,
@@ -668,6 +723,12 @@ impl TryFrom<RunRow> for Run {
                 name: row.tool_name,
                 tool_type: row.tool_type,
                 urls: serde_json::from_str(&row.tool_urls).map_err(invalid_stored_data)?,
+            },
+            audit_binding: AuditBinding {
+                standard_id: row.standard_id,
+                standard_version: row.standard_version,
+                profile_id: row.profile_id,
+                profile_version: row.profile_version,
             },
             status: RunStatus::parse(&row.status).ok_or_else(|| {
                 RepositoryError::InvalidStoredData(format!("unknown run status: {}", row.status))

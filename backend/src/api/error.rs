@@ -87,6 +87,12 @@ impl From<ServiceError> for ApiError {
                 message,
                 json!({}),
             ),
+            ServiceError::CheckResultsAlreadyExist => Self::new(
+                StatusCode::CONFLICT,
+                "check_results_already_exist",
+                error.to_string(),
+                json!({}),
+            ),
             ServiceError::ToolNotFound => Self::new(
                 StatusCode::NOT_FOUND,
                 "tool_not_found",

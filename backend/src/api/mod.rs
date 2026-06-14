@@ -12,9 +12,9 @@ use sqlx::SqlitePool;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Artifact, CreateArtifactRequest,
-        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, ResolveToolRequest,
-        Run, RunDetails, RunEvent, Tool,
+        AddIdentifierRequest, AppendRunEventRequest, Artifact, CheckResults,
+        CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
+        CreateToolRequest, Evidence, ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
     },
     repository::Repository,
     services::{DEFAULT_MAX_STORED_BYTES, ServiceError, StorageService, TrustCoreService},
@@ -77,6 +77,10 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
         .route("/api/runs/{run_id}", get(get_run))
         .route("/api/runs/{run_id}/events", post(append_event))
         .route(
+            "/api/runs/{run_id}/check-results",
+            post(create_check_results),
+        )
+        .route(
             "/api/runs/{run_id}/artifacts",
             post(upload_artifact).get(list_artifacts),
         )
@@ -131,6 +135,19 @@ async fn append_event(
     let Json(request) = payload.map_err(ApiError::invalid_json)?;
     let event = state.service.append_event(&run_id, request).await?;
     Ok((StatusCode::CREATED, Json(event)))
+}
+
+async fn create_check_results(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<CheckResultsSubmission>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<CheckResults>)> {
+    let Json(submission) = payload.map_err(ApiError::invalid_json)?;
+    let check_results = state
+        .service
+        .create_check_results(&run_id, submission)
+        .await?;
+    Ok((StatusCode::CREATED, Json(check_results)))
 }
 
 async fn create_tool(

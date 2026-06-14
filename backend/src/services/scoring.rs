@@ -6,7 +6,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    CheckResult, CheckResults, CheckResultsSubmission, DimensionScores, Finding, Rating, ToolType,
+    AuditBinding, CheckResult, CheckResults, CheckResultsSubmission, DimensionScores, Finding,
+    Rating, ToolType,
 };
 
 const STANDARD_JSON: &str = include_str!("../../../standards/alethos-toolpassport/0.3.0.json");
@@ -20,7 +21,7 @@ const CLI_API_TOOL_PROFILE_JSON: &str = include_str!("../../../profiles/cli_api_
 pub enum ScoringError {
     #[error("check_results_schema_version must be 0.1.0")]
     InvalidSchemaVersion,
-    #[error("evidence_board_version must be at least 1")]
+    #[error("evidence_board_version must be between 1 and 9223372036854775807")]
     InvalidEvidenceBoardVersion,
     #[error("finding for check {0} is duplicated")]
     DuplicateCheck(String),
@@ -135,14 +136,14 @@ struct ProfileCheck {
 
 pub fn score_check_results(
     run_id: Uuid,
-    tool_type: ToolType,
+    audit_binding: &AuditBinding,
     submission: CheckResultsSubmission,
     available_evidence_ids: &HashSet<Uuid>,
     approved_not_applicable_check_ids: &HashSet<String>,
     computed_at: DateTime<Utc>,
 ) -> Result<CheckResults, ScoringError> {
     validate_submission_header(&submission)?;
-    let (standard, profile) = load_catalog(tool_type)?;
+    let (standard, profile) = load_catalog(audit_binding)?;
     validate_catalog(&standard, &profile)?;
 
     let rules: HashMap<&str, &ScoringRule> = standard
@@ -264,11 +265,21 @@ pub fn score_check_results(
     })
 }
 
+pub fn current_audit_binding(tool_type: ToolType) -> AuditBinding {
+    AuditBinding {
+        standard_id: "alethos-toolpassport".into(),
+        standard_version: "0.3.0".into(),
+        profile_id: tool_type.as_str().into(),
+        profile_version: "0.3.0".into(),
+    }
+}
+
 fn validate_submission_header(submission: &CheckResultsSubmission) -> Result<(), ScoringError> {
     if submission.check_results_schema_version != "0.1.0" {
         return Err(ScoringError::InvalidSchemaVersion);
     }
-    if submission.evidence_board_version == 0 {
+    if submission.evidence_board_version == 0 || submission.evidence_board_version > i64::MAX as u64
+    {
         return Err(ScoringError::InvalidEvidenceBoardVersion);
     }
     Ok(())
@@ -356,12 +367,29 @@ fn parse_rating(value: &str) -> Result<Rating, ScoringError> {
         .ok_or_else(|| ScoringError::InvalidCatalog(format!("unknown rating {value}")))
 }
 
-fn load_catalog(tool_type: ToolType) -> Result<(AuditStandard, AuditProfile), ScoringError> {
-    let profile_json = match tool_type {
-        ToolType::Generic => GENERIC_PROFILE_JSON,
-        ToolType::AgentFramework => AGENT_FRAMEWORK_PROFILE_JSON,
-        ToolType::McpServer => MCP_SERVER_PROFILE_JSON,
-        ToolType::CliApiTool => CLI_API_TOOL_PROFILE_JSON,
+fn load_catalog(binding: &AuditBinding) -> Result<(AuditStandard, AuditProfile), ScoringError> {
+    if binding.standard_id != "alethos-toolpassport"
+        || binding.standard_version != "0.3.0"
+        || binding.profile_version != "0.3.0"
+    {
+        return Err(ScoringError::InvalidCatalog(format!(
+            "unsupported audit binding {}@{} / {}@{}",
+            binding.standard_id,
+            binding.standard_version,
+            binding.profile_id,
+            binding.profile_version
+        )));
+    }
+    let profile_json = match binding.profile_id.as_str() {
+        "generic" => GENERIC_PROFILE_JSON,
+        "agent_framework" => AGENT_FRAMEWORK_PROFILE_JSON,
+        "mcp_server" => MCP_SERVER_PROFILE_JSON,
+        "cli_api_tool" => CLI_API_TOOL_PROFILE_JSON,
+        profile_id => {
+            return Err(ScoringError::InvalidCatalog(format!(
+                "unsupported profile {profile_id}"
+            )));
+        }
     };
     let standard = serde_json::from_str(STANDARD_JSON)
         .map_err(|error| ScoringError::InvalidCatalog(error.to_string()))?;
@@ -414,7 +442,7 @@ fn validate_catalog(standard: &AuditStandard, profile: &AuditProfile) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::{load_catalog, validate_catalog};
+    use super::{current_audit_binding, load_catalog, validate_catalog};
     use crate::domain::ToolType;
 
     #[test]
@@ -425,7 +453,8 @@ mod tests {
             ToolType::McpServer,
             ToolType::CliApiTool,
         ] {
-            let (standard, profile) = load_catalog(tool_type).unwrap();
+            let binding = current_audit_binding(tool_type);
+            let (standard, profile) = load_catalog(&binding).unwrap();
             validate_catalog(&standard, &profile).unwrap();
         }
     }
