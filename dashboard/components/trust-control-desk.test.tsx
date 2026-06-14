@@ -75,6 +75,9 @@ function mockTrustCore(runs: Run[], details: Record<string, RunDetails> = {}) {
       const path = String(input);
       if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
       if (path === "/api/trust-core/runs") return response({ runs });
+      if (path.includes("/check-results") || path.includes("/evidence-board/") || path.includes("/passport/")) {
+        return response({ code: "not_found", message: "not found", details: {} }, 404);
+      }
       const runId = path.split("/").at(-1) ?? "";
       return response(details[runId] ?? { run: runs[0], events: [] });
     }),
@@ -93,13 +96,12 @@ describe("TrustControlDesk", () => {
     expect(screen.getByText("Loading authoritative runs…")).toBeInTheDocument();
   });
 
-  it("keeps preview modules visible when the Trust Core has no runs", async () => {
+  it("does not invent result data when the Trust Core has no runs", async () => {
     mockTrustCore([]);
     renderDesk();
     expect(await screen.findByText("No authoritative runs yet")).toBeInTheDocument();
-    expect(screen.getByText("Preview workspace")).toBeInTheDocument();
-    expect(screen.getByText("Pass with conditions")).toBeInTheDocument();
-    expect(screen.getAllByText("Preview").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("No authoritative run selected").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Pass with conditions")).not.toBeInTheDocument();
   });
 
   it("shows a retryable failure without replacing it with mock run data", async () => {
@@ -110,7 +112,7 @@ describe("TrustControlDesk", () => {
     renderDesk();
     expect(await screen.findByText("Unable to reach the Rust Trust Core.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-    expect(screen.getByText("Preview workspace")).toBeInTheDocument();
+    expect(screen.getAllByText("No authoritative run selected").length).toBeGreaterThan(0);
   });
 
   it("renders waiting approval read-only state and supports tabs and locale persistence", async () => {
@@ -124,11 +126,56 @@ describe("TrustControlDesk", () => {
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Findings" }));
-    expect(screen.getByText("Unverified third-party endpoint")).toBeInTheDocument();
+    expect(screen.getByText("Authoritative data pending")).toBeInTheDocument();
+    expect(screen.queryByText("Unverified third-party endpoint")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "中文" }));
     expect(screen.getAllByText("可信审计控制台").length).toBeGreaterThan(0);
     expect(window.localStorage.getItem("toolpassport-locale")).toBe("zh-CN");
+  });
+
+  it("renders deterministic score and dimensions from Rust Check Results", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
+        if (path === "/api/trust-core/runs") return response({ runs: [runningRun] });
+        if (path.includes("/check-results")) {
+          const dimension = (dimension_id: string, score: number) => ({
+            dimension_id,
+            score,
+            applicable_check_count: 1,
+            weighted_points: score,
+            max_weighted_points: 100,
+          });
+          return response({
+            total_score: 41,
+            rating: "trial",
+            results: [{ check_id: "generic.claim_traceability", finding: "partial", rationale: "Bound to evidence", evidence_ids: ["ev-1"], not_applicable_reason: null }],
+            dimension_scores: {
+              capability_clarity: dimension("capability_clarity", 40),
+              interface_openness: dimension("interface_openness", 41),
+              automation_readiness: dimension("automation_readiness", 42),
+              data_portability: dimension("data_portability", 43),
+              permission_risk: dimension("permission_risk", 44),
+              evidence_quality: dimension("evidence_quality", 45),
+              ecosystem_fit: dimension("ecosystem_fit", 46),
+            },
+          });
+        }
+        if (path.includes("/evidence-board/") || path.includes("/passport/")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: runningRun, events: [] });
+      }),
+    );
+
+    renderDesk();
+    expect(await screen.findByText("trial")).toBeInTheDocument();
+    expect(screen.getByText("Capability clarity")).toBeInTheDocument();
+    expect(screen.getByText("41", { selector: ".score-block > strong" })).toBeInTheDocument();
+    expect(screen.queryByText("Pass with conditions")).not.toBeInTheDocument();
   });
 
   it("filters authoritative run rows and selects a different run", async () => {

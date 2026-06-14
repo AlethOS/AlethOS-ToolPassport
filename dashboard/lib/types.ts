@@ -85,40 +85,6 @@ export interface ApiErrorBody {
   details: unknown;
 }
 
-export type PreviewSeverity = "critical" | "high" | "medium" | "low";
-
-export interface PreviewDimension {
-  id: string;
-  score: number;
-  labelKey: string;
-}
-
-export interface PreviewFinding {
-  id: string;
-  titleKey: string;
-  detailKey: string;
-  severity: PreviewSeverity;
-  evidence: string;
-}
-
-export interface PreviewPassportResult {
-  kind: "preview";
-  score: number;
-  coverage: number;
-  confidenceKey: string;
-  assessmentKey: string;
-  dimensions: PreviewDimension[];
-  findings: PreviewFinding[];
-  capabilities: string[];
-  gaps: string[];
-  limitations: string[];
-  hashes: {
-    passport: string;
-    auditLog: string;
-    evidenceManifest: string;
-  };
-}
-
 export type DashboardTab = "overview" | "findings" | "evidence" | "execution" | "provenance";
 export type Locale = "en" | "zh-CN";
 

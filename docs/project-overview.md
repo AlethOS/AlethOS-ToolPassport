@@ -227,7 +227,8 @@ orchestrator 已接入 Evidence/Artifact、冻结 Board、复核后的 Check Res
 Passport 冻结 API；后端关联运行的每个节点都会记录开始、适用决策、结束或错误事件，
 并使用 Run ID 绑定的 SQLite checkpoint 在子进程重启后从最后持久化步骤继续；
 Dashboard 执行图也按实际的候选 finding、skeptic review、Rust 评分顺序展示，并说明
-持久化恢复边界。
+持久化恢复边界。结果区不再回退到 fixture 分数、findings、Hash 或 provenance；
+Rust 尚未生成相应冻结产物时只显示明确待生成状态。
 Dashboard 不计算权威评分或 Hash，也不提供未经 Rust 后端的审批或链上写入。通用持久化
 审批记录和测试网提交仍属于计划能力。详细迁移顺序记录在
 `docs/technical-design.md`。

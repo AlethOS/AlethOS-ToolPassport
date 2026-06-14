@@ -16,7 +16,6 @@ import {
   Database,
   FileCheck2,
   Fingerprint,
-  Gauge,
   Globe2,
   Languages,
   LayoutDashboard,
@@ -30,7 +29,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   SquareTerminal,
-  Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType, type CSSProperties } from "react";
 
@@ -48,7 +46,6 @@ import {
   resolveTool,
 } from "@/lib/api";
 import { translate, type TranslationKey } from "@/lib/i18n";
-import { evidenceClaims, evidenceCoverage, previewPassport } from "@/lib/preview";
 import type {
   CheckResults,
   DashboardTab,
@@ -487,20 +484,17 @@ function MetricStrip({
   online: boolean;
 }) {
   const metrics = [
-    { label: t("runs"), value: runs, icon: ListChecks, preview: false },
-    { label: t("running"), value: counts.running, icon: Activity, preview: false },
-    { label: t("waitingApproval"), value: counts.waiting, icon: Clock3, preview: false },
-    { label: t("completed"), value: counts.completed, icon: CheckCircle2, preview: false },
-    { label: t("previewCoverage"), value: `${previewPassport.coverage}%`, icon: Gauge, preview: true },
-    { label: t("previewScore"), value: previewPassport.score, icon: ShieldCheck, preview: true },
+    { label: t("runs"), value: runs, icon: ListChecks },
+    { label: t("running"), value: counts.running, icon: Activity },
+    { label: t("waitingApproval"), value: counts.waiting, icon: Clock3 },
+    { label: t("completed"), value: counts.completed, icon: CheckCircle2 },
   ];
   return (
     <section className="metric-strip" aria-label={t("localTrustCore")}>
-      {metrics.map(({ label, value, icon: Icon, preview }) => (
+      {metrics.map(({ label, value, icon: Icon }) => (
         <div className="metric" key={label}>
           <div>
             <span>{label}</span>
-            {preview && <small>{t("preview")}</small>}
           </div>
           <strong>{value}</strong>
           <Icon size={18} aria-hidden="true" />
@@ -598,14 +592,12 @@ function ResultWorkspace({
   evidenceFreeze: EvidenceFreezeResult | null;
   passportFreeze: PassportFreezeResult | null;
 }) {
-  const hasRealData = Boolean(checkResults || evidenceFreeze || passportFreeze);
-
   return (
     <section className="panel result-workspace">
       <header className="result-header">
         <div>
           <span>{selectedRun ? t("selectedRun") : t("noRunSelected")}</span>
-          <strong>{selectedRun ? `${selectedRun.tool.name} · ${shortId(selectedRun.run_id)}` : t("previewWorkspace")}</strong>
+          <strong>{selectedRun ? `${selectedRun.tool.name} · ${shortId(selectedRun.run_id)}` : t("noRunSelected")}</strong>
         </div>
         {selectedRun && <StatusBadge status={selectedRun.status} t={t} />}
       </header>
@@ -614,11 +606,9 @@ function ResultWorkspace({
           <button className={tab === item ? "active" : ""} key={item} onClick={() => setTab(item)}>{t(item)}</button>
         ))}
       </nav>
-      {!hasRealData && (
-        <div className="preview-banner"><Zap size={15} /><strong>{t("preview")}</strong><span>{t("previewDataNotice")}</span></div>
-      )}
       <div className="result-content">
-        {tab === "overview" && (
+        {!selectedRun && <StateMessage icon={SquareTerminal} title={t("noRunSelected")} detail={t("noRunsDetail")} />}
+        {selectedRun && tab === "overview" && (
           <Overview
             t={t}
             copiedHash={copiedHash}
@@ -628,10 +618,14 @@ function ResultWorkspace({
             passportFreeze={passportFreeze}
           />
         )}
-        {tab === "findings" && <Findings t={t} checkResults={checkResults} />}
-        {tab === "evidence" && <Evidence t={t} evidenceFreeze={evidenceFreeze} />}
-        {tab === "execution" && <ExecutionFlow currentNode={currentNode} t={t} />}
-        {tab === "provenance" && <ProvenanceFlow t={t} />}
+        {selectedRun && tab === "findings" && <Findings t={t} checkResults={checkResults} />}
+        {selectedRun && tab === "evidence" && <Evidence t={t} evidenceFreeze={evidenceFreeze} />}
+        {selectedRun && tab === "execution" && <ExecutionFlow currentNode={currentNode} t={t} />}
+        {selectedRun && tab === "provenance" && (
+          passportFreeze
+            ? <ProvenanceFlow t={t} authoritative />
+            : <StateMessage icon={Fingerprint} title={t("authoritativeDataPending")} detail={t("provenancePendingDetail")} />
+        )}
       </div>
     </section>
   );
@@ -652,46 +646,68 @@ function Overview({
   checkResults: CheckResults | null;
   passportFreeze: PassportFreezeResult | null;
 }) {
-  const realScore = checkResults?.total_score ?? null;
-  const realRating = checkResults?.rating ?? null;
-  const useReal = Boolean(checkResults);
+  if (!checkResults) {
+    return <StateMessage icon={ShieldCheck} title={t("authoritativeDataPending")} detail={t("resultsPendingDetail")} />;
+  }
+
+  const dimensionLabels: Record<string, TranslationKey> = {
+    capability_clarity: "capabilityClarity",
+    interface_openness: "interfaceOpenness",
+    automation_readiness: "automationReadiness",
+    data_portability: "dataPortability",
+    permission_risk: "permissionRisk",
+    evidence_quality: "evidenceQuality",
+    ecosystem_fit: "ecosystemFit",
+  };
+  const dimensions = Object.values(checkResults.dimension_scores);
+  const evidenceCoverage = checkResults.results.length === 0
+    ? 0
+    : Math.round(
+      checkResults.results.filter((finding) => finding.evidence_ids.length > 0).length
+      / checkResults.results.length
+      * 100,
+    );
+  const failedFindings = checkResults.results
+    .filter((finding) => finding.finding === "fail" || finding.finding === "unknown")
+    .map((finding) => finding.check_id);
+  const capabilities = passportFreeze?.passport.capability_claims.map((claim) => claim.statement) ?? [];
+  const gaps = passportFreeze?.passport.known_gaps ?? [];
+  const risks = passportFreeze?.passport.risks.map((risk) => risk.title) ?? [];
 
   return (
     <div className="overview">
       <section className="assessment">
         <div className="assessment-copy">
           <span className="eyebrow">
-            {useReal ? t("overallAssessment") : t("overallAssessment")} · {t("evidenceBound")}
+            {t("overallAssessment")} · {t("authoritative")}
           </span>
           <div className="assessment-title">
             <ShieldCheck size={40} />
             <div>
               <h2>
-                {useReal && realRating
-                  ? realRating.replace(/_/g, " ")
-                  : t("passWithConditions")}
+                {checkResults.rating.replace(/_/g, " ")}
               </h2>
-              <p>{t("assessmentDetail")}</p>
+              <p>{passportFreeze?.passport.recommendation.summary ?? t("resultsPendingPassportDetail")}</p>
             </div>
           </div>
         </div>
         <ScoreBlock
           label={t("trustScore")}
-          value={useReal && realScore != null ? realScore : previewPassport.score}
-          caption={useReal ? t("deterministicScore") : t("projected")}
+          value={checkResults.total_score}
+          caption={t("deterministicScore")}
         />
         <ScoreBlock
           label={t("evidenceCoverage")}
-          value={previewPassport.coverage}
-          caption={`${t("confidence")}: ${t("mediumConfidence")}`}
+          value={evidenceCoverage}
+          caption={t("evidenceReferenceCoverage")}
         />
       </section>
       <section className="dimension-section">
-        <div className="section-heading"><h2>{t("auditDimensions")}</h2><span className="preview-pill">{t("preview")}</span></div>
+        <div className="section-heading"><h2>{t("auditDimensions")}</h2></div>
         <div className="dimensions">
-          {previewPassport.dimensions.map((dimension) => (
-            <div className="dimension" key={dimension.id}>
-              <span>{t(dimension.labelKey as TranslationKey)}</span>
+          {dimensions.map((dimension) => (
+            <div className="dimension" key={dimension.dimension_id}>
+              <span>{t(dimensionLabels[dimension.dimension_id] ?? "auditDimensions")}</span>
               <strong className={scoreTone(dimension.score)}>{dimension.score}</strong>
               <Progress value={dimension.score} />
             </div>
@@ -699,28 +715,28 @@ function Overview({
         </div>
       </section>
       <section className="insight-grid">
-        <InsightList icon={ShieldAlert} title={t("highRiskFindings")} tone="danger" items={previewPassport.findings.slice(0, 2).map((item) => t(item.titleKey as TranslationKey))} action={t("viewAllFindings")} onAction={() => setTab("findings")} />
-        <InsightList icon={CheckCircle2} title={t("supportedCapabilities")} tone="good" items={previewPassport.capabilities.map((item) => t(item as TranslationKey))} />
-        <InsightList icon={AlertTriangle} title={t("unresolvedGaps")} tone="warn" items={previewPassport.gaps.map((item) => t(item as TranslationKey))} />
-        <InsightList icon={Globe2} title={t("scopeLimitations")} tone="info" items={previewPassport.limitations.map((item) => t(item as TranslationKey))} />
+        <InsightList icon={ShieldAlert} title={t("failedOrUnknownFindings")} tone="danger" items={failedFindings} action={t("viewAllFindings")} onAction={() => setTab("findings")} />
+        <InsightList icon={CheckCircle2} title={t("supportedCapabilities")} tone="good" items={capabilities} />
+        <InsightList icon={AlertTriangle} title={t("unresolvedGaps")} tone="warn" items={gaps} />
+        <InsightList icon={Globe2} title={t("recordedRisks")} tone="info" items={risks} />
       </section>
-      <section className="hash-section">
-        <div className="section-heading"><h2>{t("previewCommitments")}</h2><span className="preview-pill">{t("notAttested")}</span></div>
+      {passportFreeze && <section className="hash-section">
+        <div className="section-heading"><h2>{t("frozenCommitments")}</h2><span className="authority-chip online">{t("authoritative")}</span></div>
         <div className="hash-grid">
           {([
-            ["passportHash", passportFreeze?.provenance?.passport_hash ?? previewPassport.hashes.passport, Fingerprint],
-            ["auditLogHash", passportFreeze?.provenance?.audit_log_hash ?? previewPassport.hashes.auditLog, FileCheck2],
-            ["evidenceManifestHash", passportFreeze?.provenance?.evidence_manifest_hash ?? previewPassport.hashes.evidenceManifest, Database],
+            ["passportHash", passportFreeze.provenance.passport_hash, Fingerprint],
+            ["auditLogHash", passportFreeze.provenance.audit_log_hash, FileCheck2],
+            ["evidenceManifestHash", passportFreeze.provenance.evidence_manifest_hash, Database],
           ] as Array<[TranslationKey, string, ComponentType<{ size?: number }>]>) .map(([label, value, Icon]) => (
             <div className="hash-card" key={label}>
               <Icon size={20} />
-              <div><span>{t(label)}</span><strong>{value}</strong><small>{passportFreeze ? t("deterministicScore") : t("notAttested")}</small></div>
+              <div><span>{t(label)}</span><strong>{value}</strong><small>{t("frozenByTrustCore")}</small></div>
               <button onClick={() => copyHash(value)} title={t("copy")}>{copiedHash === value ? <Check size={15} /> : <Copy size={15} />}</button>
             </div>
           ))}
         </div>
         <p className="trust-boundary"><AlertCircle size={14} />{t("trustBoundary")}</p>
-      </section>
+      </section>}
     </div>
   );
 }
@@ -759,19 +775,7 @@ function Findings({
     );
   }
 
-  return (
-    <section className="detail-view">
-      <div className="section-heading"><div><span className="preview-pill">{t("preview")}</span><h2>{t("findings")}</h2><p>{t("previewFindingNotice")}</p></div></div>
-      <div className="finding-list">
-        {previewPassport.findings.map((finding) => (
-          <article className="finding-row" key={finding.id}>
-            <ShieldAlert size={20} />
-            <div><div><strong>{t(finding.titleKey as TranslationKey)}</strong><Severity severity={finding.severity} t={t} /></div><p>{t(finding.detailKey as TranslationKey)}</p><small>{t("evidenceReference")}: {finding.evidence}</small></div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
+  return <StateMessage icon={ShieldAlert} title={t("authoritativeDataPending")} detail={t("resultsPendingDetail")} />;
 }
 
 function Evidence({
@@ -822,18 +826,7 @@ function Evidence({
     );
   }
 
-  return (
-    <section className="detail-view">
-      <div className="section-heading"><div><span className="preview-pill">{t("preview")}</span><h2>{t("evidenceBoard")}</h2><p>{t("evidenceBoardDetail")}</p></div></div>
-      <div className="coverage-list">
-        {evidenceCoverage.map((item) => <div className="coverage-row" key={item.labelKey}><div><strong>{t(item.labelKey as TranslationKey)}</strong><span>{item.count}</span></div><Progress value={item.value} /><b>{item.value}%</b></div>)}
-      </div>
-      <div className="claim-table">
-        <div className="claim-head"><span>{t("claim")}</span><span>{t("status")}</span><span>{t("sources")}</span></div>
-        {evidenceClaims.map((item) => <div className="claim-row" key={item.claimKey}><strong>{t(item.claimKey as TranslationKey)}</strong><span className={`claim-status ${item.statusKey}`}>{t(item.statusKey as TranslationKey)}</span><b>{item.evidence}</b></div>)}
-      </div>
-    </section>
-  );
+  return <StateMessage icon={Database} title={t("authoritativeDataPending")} detail={t("evidencePendingDetail")} />;
 }
 
 function TrustInspector({
@@ -936,10 +929,6 @@ function Progress({ value }: { value: number }) {
 
 function InsightList({ icon: Icon, title, items, tone, action, onAction }: { icon: ComponentType<{ size?: number }>; title: string; items: string[]; tone: string; action?: string; onAction?: () => void }) {
   return <article className={`insight ${tone}`}><h3><Icon size={16} />{title}</h3><ul>{items.slice(0, 5).map((item) => <li key={item}><CheckCircle2 size={13} />{item}</li>)}</ul>{action && <button onClick={onAction}>{action}<ChevronRight size={14} /></button>}</article>;
-}
-
-function Severity({ severity, t }: { severity: "critical" | "high" | "medium" | "low"; t: (key: TranslationKey) => string }) {
-  return <span className={`severity ${severity}`}>{t(severity)}</span>;
 }
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {

@@ -75,7 +75,7 @@ export function ExecutionFlow({ currentNode, t }: { currentNode: string | null; 
   );
 }
 
-export function ProvenanceFlow({ t }: { t: Translator }) {
+export function ProvenanceFlow({ t, authoritative = false }: { t: Translator; authoritative?: boolean }) {
   const nodes: Node[] = [
     { id: "tool", position: { x: 20, y: 75 }, data: { label: "Tool identity" }, style: nodeStyle },
     { id: "run", position: { x: 210, y: 75 }, data: { label: "Audit run" }, style: nodeStyle },
@@ -92,7 +92,7 @@ export function ProvenanceFlow({ t }: { t: Translator }) {
   ];
 
   return (
-    <FlowFrame title={t("provenancePreview")} detail={t("provenancePreviewDetail")}>
+    <FlowFrame title={t("provenancePreview")} detail={t("provenancePreviewDetail")} preview={!authoritative}>
       <ReactFlow
         aria-label={t("provenancePreview")}
         nodes={nodes}
