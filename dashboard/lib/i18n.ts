@@ -84,6 +84,7 @@ const en = {
   runtimeNotExecuted: "Audited project was not installed or executed",
   evidenceBoard: "Evidence board preview",
   evidenceBoardDetail: "Illustrative claim coverage for the future Evidence Board.",
+  unlinkedEvidenceNotice: "Collected evidence is not linked to validated claims or checks and cannot support a passing finding.",
   officialDocs: "Official documentation",
   repositoryEvidence: "Repository evidence",
   publicExamples: "Public examples",
@@ -168,6 +169,11 @@ const en = {
   eventProvenanceFrozen: "Provenance frozen",
   deterministicScore: "Deterministic score",
   checks: "checks",
+  startAudit: "Audit",
+  auditing: "Auditing...",
+  auditCreated: "Created",
+  auditDirectivesPlaceholder: "Directives (optional)",
+  dismiss: "Dismiss",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -254,6 +260,7 @@ const zh: Record<keyof typeof en, string> = {
   runtimeNotExecuted: "未安装或执行被审计项目",
   evidenceBoard: "证据看板预览",
   evidenceBoardDetail: "未来 Evidence Board 的示意 claim 覆盖视图。",
+  unlinkedEvidenceNotice: "已采集的证据尚未绑定到经过验证的声明或检查项，不能作为通过结论的依据。",
   officialDocs: "官方文档",
   repositoryEvidence: "仓库证据",
   publicExamples: "公开示例",
@@ -338,6 +345,11 @@ const zh: Record<keyof typeof en, string> = {
   eventProvenanceFrozen: "溯源已冻结",
   deterministicScore: "确定性评分",
   checks: "检查项",
+  startAudit: "开始审计",
+  auditing: "审计中...",
+  auditCreated: "已创建",
+  auditDirectivesPlaceholder: "审计指令（可选）",
+  dismiss: "关闭",
 };
 
 export type TranslationKey = keyof typeof en;

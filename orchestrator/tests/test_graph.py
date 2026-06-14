@@ -16,6 +16,7 @@ def _make_initial(**overrides: object) -> GraphState:
         "tool_id": MOCK_TOOL["tool_id"],
         "tool_name": MOCK_TOOL["name"],
         "tool_type": MOCK_TOOL["tool_type"],
+        "canonical_url": MOCK_TOOL["canonical_url"],
         "target_revision": MOCK_TOOL["target_revision"],
     }
     defaults.update(overrides)
@@ -70,6 +71,16 @@ def test_stop_condition_respects_max_rounds() -> None:
     assert "max_rounds_reached" in result.stop_reason
     assert result.phase == "done"
     assert result.passport_draft is not None
+
+
+def test_stop_condition_respects_max_sources() -> None:
+    """The source budget stops additional mock collection."""
+    initial = _make_initial(research_budget=ResearchBudget(max_rounds=3, max_sources=1))
+    result = GraphState.model_validate(build_graph().invoke(initial))
+
+    assert result.research_round == 1
+    assert result.research_budget.sources_used == 1
+    assert result.stop_reason == "max_sources_reached (1)"
 
 
 def test_skeptic_review_downgrades_weak_high_risk() -> None:

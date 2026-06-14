@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
   Activity,
   AlertCircle,
@@ -36,12 +36,16 @@ import { useEffect, useMemo, useState, type ComponentType, type CSSProperties } 
 
 import { ExecutionFlow, ProvenanceFlow } from "@/components/flow-panels";
 import {
+  createRun,
+  createTool,
   getEvidenceBoard,
   getHealth,
   getRunCheckResults,
   getRunDetails,
   getPassport,
   getRuns,
+  launchInvestigation,
+  resolveTool,
 } from "@/lib/api";
 import { translate, type TranslationKey } from "@/lib/i18n";
 import { evidenceClaims, evidenceCoverage, previewPassport } from "@/lib/preview";
@@ -116,6 +120,64 @@ export function TrustControlDesk() {
   const [filter, setFilter] = useState<"all" | RunStatus>("all");
   const [tab, setTab] = useState<DashboardTab>("overview");
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const [auditUrl, setAuditUrl] = useState("");
+  const [auditDirectives, setAuditDirectives] = useState("");
+  const [auditStatus, setAuditStatus] = useState<"idle" | "resolving" | "creating" | "done" | "error">("idle");
+  const [auditError, setAuditError] = useState<string | null>(null);
+
+  const auditMutation = useMutation({
+    mutationFn: async (url: string) => {
+      setAuditStatus("resolving");
+      setAuditError(null);
+
+      // Extract repo name from GitHub URL for the tool name.
+      const name = url.replace(/^https?:\/\/github\.com\//, "").replace(/\/$/, "").replace(/\.git$/, "");
+
+      // Resolve or create the tool.
+      const resolved = await resolveTool({ intake_version: "0.1.0", name, tool_type: "generic", urls: [url] });
+      let toolId = resolved.tool_id;
+      if (resolved.status === "create_candidate" && resolved.normalized_identifiers.length === 1) {
+        const identifier = resolved.normalized_identifiers[0];
+        toolId = `${identifier.namespace}:${identifier.value}`;
+        await createTool({
+          tool_id: toolId,
+          name,
+          tool_type: "generic",
+          canonical_url: identifier.canonical_url,
+          external_identifiers: [identifier],
+          aliases: [],
+        });
+      }
+      if (!toolId) {
+        throw new Error(`Tool identity requires human review: ${resolved.reason_codes.join(", ")}`);
+      }
+
+      // Create the audit run.
+      setAuditStatus("creating");
+      const run = await createRun(
+        auditDirectives.trim()
+          ? `Audit ${name}. Directives: ${auditDirectives.trim()}`
+          : `Audit ${name} as a software tool`,
+        toolId,
+      );
+
+      // Launch the orchestrator investigation in the background.
+      await launchInvestigation(run.run_id);
+
+      return run;
+    },
+    onSuccess: (run) => {
+      setAuditStatus("done");
+      setSelectedRunId(run.run_id);
+      setAuditUrl("");
+      setAuditDirectives("");
+      setTimeout(() => setAuditStatus("idle"), 2000);
+    },
+    onError: (error: Error) => {
+      setAuditStatus("error");
+      setAuditError(error.message);
+    },
+  });
   const t = (key: TranslationKey) => translate(locale, key);
   const refreshInterval = autoRefresh ? 5_000 : false;
 
@@ -135,7 +197,7 @@ export function TrustControlDesk() {
     refetchInterval: refreshInterval,
   });
   const selectedRun = detailsQuery.data?.run ?? runs.find((run) => run.run_id === activeRunId) ?? null;
-  const events = detailsQuery.data?.events ?? [];
+  const events = useMemo(() => detailsQuery.data?.events ?? [], [detailsQuery.data?.events]);
 
   // Derive frozen board version and passport sequence from events.
   const frozenBoardVersion = useMemo(() => {
@@ -218,6 +280,17 @@ export function TrustControlDesk() {
           setAutoRefresh={setAutoRefresh}
         />
         <main className="desk-main">
+          <AuditBar
+            t={t}
+            url={auditUrl}
+            setUrl={setAuditUrl}
+            directives={auditDirectives}
+            setDirectives={setAuditDirectives}
+            status={auditStatus}
+            error={auditError}
+            onAudit={() => auditMutation.mutate(auditUrl)}
+            onDismiss={() => { setAuditStatus("idle"); setAuditError(null); }}
+          />
           <MetricStrip t={t} runs={runs.length} counts={counts} online={healthQuery.isSuccess} />
           <div className="desk-grid">
             <RunQueue
@@ -329,6 +402,76 @@ function Topbar({
         </div>
       </div>
     </header>
+  );
+}
+
+function AuditBar({
+  t,
+  url,
+  setUrl,
+  directives,
+  setDirectives,
+  status,
+  error,
+  onAudit,
+  onDismiss,
+}: {
+  t: (key: TranslationKey) => string;
+  url: string;
+  setUrl: (v: string) => void;
+  directives: string;
+  setDirectives: (v: string) => void;
+  status: string;
+  error: string | null;
+  onAudit: () => void;
+  onDismiss: () => void;
+}) {
+  const isLoading = status === "resolving" || status === "creating";
+  const isDone = status === "done";
+
+  return (
+    <div className="audit-bar">
+      <div className="audit-bar-row">
+        <Globe2 size={18} />
+        <input
+          type="url"
+          placeholder="https://github.com/owner/repo"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && url && !isLoading) onAudit(); }}
+          disabled={isLoading}
+          className="audit-url-input"
+        />
+        <input
+          type="text"
+          placeholder={t("auditDirectivesPlaceholder") ?? "Directives (optional)"}
+          value={directives}
+          onChange={(e) => setDirectives(e.target.value)}
+          disabled={isLoading}
+          className="audit-directives-input"
+        />
+        <button
+          onClick={onAudit}
+          disabled={!url || isLoading}
+          className={isDone ? "audit-btn done" : "audit-btn"}
+        >
+          {isLoading && <LoaderCircle size={14} className="spin" />}
+          {isDone && <Check size={14} />}
+          {status === "idle" && <Search size={14} />}
+          {status === "error" && <AlertCircle size={14} />}
+          <span>
+            {isLoading ? t("auditing") : isDone ? t("auditCreated") : t("startAudit")}
+          </span>
+        </button>
+      </div>
+      {error && (
+        <div className="audit-error">
+          <AlertCircle size={14} />
+          <span>{error}</span>
+          <button onClick={onDismiss}>{t("dismiss")}</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -656,6 +799,12 @@ function Evidence({
             <div><strong>Gaps</strong><span>{board.gaps.length}</span></div>
           </div>
         </div>
+        {board.evidence_ids.length > 0 && board.claims.length === 0 && (
+          <p className="trust-boundary">
+            <AlertCircle size={14} />
+            {t("unlinkedEvidenceNotice")}
+          </p>
+        )}
         <table className="claim-table">
           <thead><tr><th>Claim ID</th><th>Check ID</th><th>Statement</th><th>Confidence</th></tr></thead>
           <tbody>

@@ -7,6 +7,7 @@ import type {
   EvidenceListResponse,
   HealthResponse,
   PassportFreezeResult,
+  Run,
   RunDetails,
   RunListResponse,
 } from "@/lib/types";
@@ -74,4 +75,71 @@ export function getPassport(runId: string, sequence: number): Promise<PassportFr
   return getJson(
     `/api/trust-core/runs/${encodeURIComponent(runId)}/passport/${sequence}`,
   );
+}
+
+// ── Write operations ────────────────────────────────────────────────
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await response.json().catch(() => null)) as ApiErrorBody | T | null;
+
+  if (!response.ok) {
+    const errorBody = json as ApiErrorBody | null;
+    throw new TrustCoreApiError(
+      errorBody?.message ?? "Trust Core request failed",
+      response.status,
+      errorBody,
+    );
+  }
+
+  return json as T;
+}
+
+export interface ResolveToolRequest {
+  intake_version: "0.1.0";
+  name: string;
+  tool_type: "generic" | "agent_framework" | "mcp_server" | "cli_api_tool";
+  urls: string[];
+}
+
+export interface ResolveToolResponse {
+  resolution_version: string;
+  status: "resolved" | "create_candidate" | "needs_review";
+  normalized_identifiers: Array<{
+    namespace: string;
+    value: string;
+    canonical_url: string;
+  }>;
+  tool_id: string | null;
+  candidate_tool_ids: string[];
+  reason_codes: string[];
+}
+
+export interface CreateToolRequest {
+  tool_id: string;
+  name: string;
+  tool_type: "generic" | "agent_framework" | "mcp_server" | "cli_api_tool";
+  canonical_url: string;
+  external_identifiers: ResolveToolResponse["normalized_identifiers"];
+  aliases: string[];
+}
+
+export function resolveTool(request: ResolveToolRequest): Promise<ResolveToolResponse> {
+  return postJson("/api/trust-core/tools/resolve", request);
+}
+
+export function createTool(request: CreateToolRequest): Promise<unknown> {
+  return postJson("/api/trust-core/tools/create", request);
+}
+
+export function createRun(goal: string, toolId: string): Promise<Run> {
+  return postJson("/api/trust-core/runs/create", { goal, tool_id: toolId });
+}
+
+export function launchInvestigation(runId: string): Promise<{ status: string; pid: number }> {
+  return postJson(`/api/trust-core/runs/${encodeURIComponent(runId)}/investigate`, {});
 }

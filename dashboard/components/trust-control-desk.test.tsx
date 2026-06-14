@@ -145,4 +145,93 @@ describe("TrustControlDesk", () => {
     await user.click(screen.getByText("MCP Tool"));
     await waitFor(() => expect(screen.getAllByText(/MCP Tool/).length).toBeGreaterThan(0));
   });
+
+  it("warns when collected evidence has no validated claim mappings", async () => {
+    const freezeEvent: RunEvent = {
+      ...events[0],
+      run_id: runningRun.run_id,
+      event_type: "evidence_board_frozen",
+      payload: { evidence_board_version: 1 },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/health")) {
+          return response({ status: "ok", service: "toolpassport-backend" });
+        }
+        if (path === "/api/trust-core/runs") return response({ runs: [runningRun] });
+        if (path.includes("/evidence-board/1")) {
+          return response({
+            evidence_board: {
+              version: 1,
+              evidence_ids: ["evidence-1"],
+              claims: [],
+              gaps: [],
+            },
+            evidence_manifest: { entries: [] },
+          });
+        }
+        if (path.includes("/check-results")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: runningRun, events: [freezeEvent] });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderDesk();
+    await user.click(await screen.findByRole("button", { name: "Evidence" }));
+    expect(await screen.findByText(/Collected evidence is not linked/)).toBeInTheDocument();
+  });
+
+  it("creates a resolved tool candidate before launching a live investigation", async () => {
+    const requested: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        requested.push(path);
+        if (path.includes("/health")) {
+          return response({ status: "ok", service: "toolpassport-backend" });
+        }
+        if (path === "/api/trust-core/runs") return response({ runs: [] });
+        if (path === "/api/trust-core/tools/resolve") {
+          return response({
+            resolution_version: "0.1.0",
+            status: "create_candidate",
+            normalized_identifiers: [
+              {
+                namespace: "github",
+                value: "example/new-tool",
+                canonical_url: "https://github.com/example/new-tool",
+              },
+            ],
+            tool_id: null,
+            candidate_tool_ids: [],
+            reason_codes: ["new_strong_identifier"],
+          });
+        }
+        if (path === "/api/trust-core/tools/create") {
+          return response({ tool_id: "github:example/new-tool" }, 201);
+        }
+        if (path === "/api/trust-core/runs/create") {
+          return response({ ...runningRun, run_id: "new-run" }, 201);
+        }
+        if (path === "/api/trust-core/runs/new-run/investigate") {
+          return response({ status: "launched", pid: 1234 });
+        }
+        return response({ code: "not_found", message: "not found", details: {} }, 404);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderDesk();
+    await user.type(screen.getByPlaceholderText("https://github.com/owner/repo"), "https://github.com/example/new-tool");
+    await user.click(screen.getByRole("button", { name: "Audit" }));
+
+    expect(await screen.findByRole("button", { name: "Created" })).toBeInTheDocument();
+    expect(requested).toContain("/api/trust-core/tools/create");
+    expect(requested).toContain("/api/trust-core/runs/new-run/investigate");
+  });
 });

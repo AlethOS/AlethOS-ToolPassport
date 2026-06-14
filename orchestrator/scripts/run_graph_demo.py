@@ -52,6 +52,7 @@ def main() -> None:
         tool_id=MOCK_TOOL["tool_id"],
         tool_name=MOCK_TOOL["name"],
         tool_type=MOCK_TOOL["tool_type"],
+        canonical_url=MOCK_TOOL["canonical_url"],
         target_revision=MOCK_TOOL["target_revision"],
     )
 

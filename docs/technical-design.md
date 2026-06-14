@@ -671,6 +671,7 @@ web3/         Alloy client 和 Registry 调用
 | Implemented | `GET /api/tools` | 返回规范 Tool 列表 |
 | Implemented | `GET /api/tools/by-id?tool_id=...` | 返回 Tool 身份与别名；避免 namespaced ID 中的斜线破坏路径语义 |
 | Implemented | `POST /api/runs` | 原子创建 pending Run 和首个 `run_created` 事件；当前尚不启动 orchestrator；目标输入将增加可选 `audit_directives` 字段 |
+| Partial | `POST /api/runs/:run_id/investigate` | 在用户请求后启动仓库内受控 orchestrator 子进程；进程幂等、持久化生命周期和生产恢复仍待实现 |
 | Implemented | `GET /api/runs` | 返回 Run 列表 |
 | Implemented | `GET /api/runs/:run_id` | 返回 Run 和当前事件列表 |
 | Implemented | `POST /api/runs/:run_id/events` | 追加 v0.1 事件，并原子投影已验证的 Run 状态和当前节点 |
@@ -731,12 +732,12 @@ Tool Index 按规范 Tool 聚合审计历史，允许用户查看同一工具的
 
 人工操作必须清楚区分“继续调研”“批准链下结果”“批准测试网 attestation”和“拒绝”。上链批准页面必须显示绑定的 Tool、Run、三个 Hash、chain ID 和 Registry 地址。
 
-当前 Dashboard 已实现只读 Trust Control Desk：通过同源 Next.js GET 代理读取 Rust
+当前 Dashboard 已实现 Trust Control Desk：通过同源 Next.js 代理读取 Rust
 `/health`、Run 列表与 Run 详情/Event，使用 TanStack Query 轮询并展示 loading、空、
-失败和 `waiting_approval` 状态。Overview、Findings、Evidence、Execution 与
+失败和 `waiting_approval` 状态；还可解析或创建规范 GitHub Tool、创建 Run 并请求
+后端启动调查。Overview、Findings、Evidence、Execution 与
 Provenance 中尚无后端权威契约的内容必须使用隔离 fixture，并在 UI 与 TypeScript
-类型中明确标记为 Preview。当前 Dashboard 不提供创建 Run、追加 Event、审批、签名
-或链上写入。
+类型中明确标记为 Preview。当前 Dashboard 不提供追加 Event、审批、签名或链上写入。
 
 ## 12. 安全与外部访问边界
 
@@ -754,6 +755,11 @@ permissions:
 ```
 
 URL loader 必须限制协议、域名策略、响应大小、超时和重定向，并阻止访问本机、内网和云 metadata 地址。日志、事件、Evidence 和 Artifact 必须脱敏。orchestrator 子进程只获得必要环境变量。外部内容视为不可信数据，不能改变系统指令、Profile、预算或工具权限。用户审计指令作为可引导调查方向的受控输入，由 `intake_normalization` 验证后以结构化约束形式传递给下游节点；指令不能绕过安全边界或改变 Profile、预算和评分规则。
+
+真实网络调研使用 Run 冻结的规范 URL，不得从 mock fixture 推断目标。每次请求和每次
+重定向都必须重新执行 HTTPS、同源与私网地址检查。采集到网页只表示“来源已读取”，
+在经过结构化 claim/check 映射与验证前，其 `supports` / `contradicts` 必须保持为空；
+真实调研失败或来源预算耗尽时生成有限结论，不得静默回退为 mock Evidence。
 
 以下操作始终标记 `[HUMAN REQUIRED]`：提供 credentials；授权付费服务；选择有争议的审计政策；批准不受信来源；签名；部署；链上写入；以及决定是否接受证据不足的高风险结论。
 

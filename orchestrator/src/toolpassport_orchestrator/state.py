@@ -77,10 +77,12 @@ class GraphState(BaseModel):
     run_id: str
     goal: str
     audit_directives: str | None = None
+    research_mode: Literal["mock", "live"] = "mock"
     # Tool identity (populated by intake / fingerprint)
     tool_id: str | None = None
     tool_name: str | None = None
     tool_type: str | None = None
+    canonical_url: str | None = None
     target_revision: str | None = None
     # Standard & Profile (populated by profile_selector)
     standard_version: str = "0.2.0"

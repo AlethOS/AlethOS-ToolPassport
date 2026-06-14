@@ -95,6 +95,7 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
             post(append_event).get(list_run_events),
         )
         .route("/api/runs/{run_id}/events/stream", get(stream_run_events))
+        .route("/api/runs/{run_id}/investigate", post(launch_investigation))
         .route(
             "/api/runs/{run_id}/check-results",
             post(create_check_results).get(get_latest_check_results),
@@ -390,4 +391,42 @@ async fn get_latest_check_results(
             serde_json::json!({}),
         )),
     }
+}
+
+/// POST /api/runs/{run_id}/investigate
+/// Launches the orchestrator subprocess for the given run.
+/// The orchestrator reads BACKEND_URL and RUN_ID from the environment.
+async fn launch_investigation(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let run = state.service.get_run_details(&run_id).await?;
+
+    let backend_url =
+        std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
+    let python_cmd = std::env::var("ORCHESTRATOR_PYTHON").unwrap_or_else(|_| "python3".to_owned());
+    let orch_dir =
+        std::env::var("ORCHESTRATOR_DIR").unwrap_or_else(|_| "../orchestrator".to_owned());
+    let live_research = std::env::var("ORCHESTRATOR_LIVE_RESEARCH").unwrap_or_default();
+
+    let mut cmd = std::process::Command::new(&python_cmd);
+    cmd.arg("scripts/live_audit.py")
+        .arg(&run.run.canonical_url)
+        .env("BACKEND_URL", &backend_url)
+        .env("RUN_ID", run.run.run_id.to_string())
+        .env("PYTHONPATH", "src")
+        .env("ORCHESTRATOR_LIVE_RESEARCH", &live_research)
+        .current_dir(&orch_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    let child = cmd.spawn().map_err(|error| {
+        ServiceError::InvalidRequest(format!("failed to launch orchestrator: {error}"))
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "status": "launched",
+        "run_id": run.run.run_id.to_string(),
+        "pid": child.id(),
+    })))
 }

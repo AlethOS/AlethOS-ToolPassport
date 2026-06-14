@@ -1153,3 +1153,18 @@ async fn sse_stream_endpoint_rejects_missing_run() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn investigate_endpoint_rejects_missing_run_before_launching_process() {
+    let (router, _pool) = test_app().await;
+    let fake_id = Uuid::new_v4().to_string();
+    let (status, body) = send_json(
+        &router,
+        Method::POST,
+        &format!("/api/runs/{fake_id}/investigate"),
+        json!({}),
+    )
+    .await;
+
+    assert_error(&(status, body), StatusCode::NOT_FOUND, "run_not_found");
+}
