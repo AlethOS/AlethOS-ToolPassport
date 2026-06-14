@@ -500,7 +500,7 @@ def freeze_evidence_board(state: GraphState) -> dict[str, Any]:
 
 
 def check_execution(state: GraphState) -> dict[str, Any]:
-    """Produce a CheckFinding for each profile check based on available evidence."""
+    """Produce proposed CheckFindings for each profile check."""
     checks = _profile_checks(state)
 
     # Build index: check_id → list of supporting evidence IDs
@@ -533,10 +533,16 @@ def check_execution(state: GraphState) -> dict[str, Any]:
             )
         )
 
-    # Optionally submit to backend.
-    updates: dict[str, Any] = {
+    return {
         "current_node": "check_execution",
         "check_findings": findings,
+    }
+
+
+def persist_check_results(state: GraphState) -> dict[str, Any]:
+    """Submit skeptic-reviewed findings to Rust for deterministic scoring."""
+    updates: dict[str, Any] = {
+        "current_node": "persist_check_results",
     }
 
     backend = get_backend_client()
@@ -544,7 +550,7 @@ def check_execution(state: GraphState) -> dict[str, Any]:
         return updates
 
     finding_submissions: list[dict[str, Any]] = []
-    for f in findings:
+    for f in state.check_findings:
         submission: dict[str, Any] = {
             "check_id": f.check_id,
             "finding": f.finding,

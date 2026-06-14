@@ -11,7 +11,7 @@
 | Target | 已确定的目标设计，仍需按迁移顺序实现 |
 | Future | MVP 后再评估，不属于当前契约 |
 
-截至 2026-06-13，机器可读权威包括共享运行时 v0.1 schema、Audit
+截至 2026-06-14，机器可读权威包括共享运行时 v0.1 schema、Audit
 Standard/Profile schema、历史 `0.2.0` 与评分绑定 `0.3.0` catalog、Tool Identity
 v0.1 schema、Artifact v0.1 schema、
 Evidence v0.2 create/stored schema，以及 Stage 6 的 Check Result submission/stored、
@@ -333,7 +333,7 @@ flowchart TD
 
 ### 5.1 节点契约与使用规则
 
-所有节点必须有类型化输入和输出，在开始与结束时请求 Rust 追加事件，并把可复查结果保存为 Artifact。节点输出只包含决策摘要和结构化结果，不保存私有 chain-of-thought。失败必须产生可操作错误和明确路由。
+所有节点必须有类型化输入和输出，在开始与结束时请求 Rust 追加事件，并把可复查结果保存为 Artifact。当前 orchestrator 已统一封装节点生命周期：后端关联运行会在每个节点写入 `node_started`，写入适用的决策事件，并以 `node_finished` 或 `error` 收尾；任一必需事件持久化失败都会阻止图继续前进。节点输出只包含决策摘要和结构化结果，不保存私有 chain-of-thought。失败必须产生可操作错误和明确路由。
 
 | Node | 输入与职责 | 必须产出 | 使用规则与分支 |
 | --- | --- | --- | --- |
@@ -349,11 +349,12 @@ flowchart TD
 | `gap_analysis` | Evidence Board、Profile 和预算 | 按影响排序的 gaps、覆盖率和停止建议 | 优先高权重与高风险缺口；不得为低价值问题无限调研 |
 | `next_query_planning` | gaps 和已尝试查询 | 下一轮查询计划或停止理由 | 必须避免无变化重复查询；重复失败升级为人工决定或有限结论 |
 | `freeze_evidence_board` | 当前 Board、gaps 和范围 | 不可变 Board version 与冻结摘要 | 冻结后不能静默追加证据；继续调研创建新 Board version |
-| `check_execution` | 冻结 Board 和 Profile rules | 每个 check 的 finding、理由和 evidence IDs | GLM 可提出 finding，Rust 验证结构并执行确定性评分 |
+| `check_execution` | 冻结 Board 和 Profile rules | 每个 check 的候选 finding、理由和 evidence IDs | GLM 只提出 finding，不得在 skeptic review 前触发权威评分 |
 | `risk_register_builder` | Check findings 和权限 taxonomy | 风险、影响、缓解建议和人工检查项 | 文件、Shell、密钥、钱包、数据库写入和费用风险必须显式处理 |
 | `counter_evidence_search` | 高分 claims、高风险项和冲突 | 反证查询与结果 | 每个高风险权限至少一轮；不得仅搜索支持性材料 |
 | `consistency_review` | Board、findings、risk register 和草稿 | 无证据结论、冲突、遗漏和过度声明清单 | 发现问题时返回 mapping、checks 或 research，不直接掩盖问题 |
 | `score_calibration` | Findings、review issues 和规则 | 校准后的 finding 建议与评分变更理由 | 评分仍由 Rust 计算；弱证据、高冲突和未知边界不得获得高分 |
+| `persist_check_results` | skeptic review 后的 Findings 和冻结 Board | Rust-owned Check Results、总分和 rating | 仅在复核完成后向 Rust 提交；Rust 验证结构、证据归属并执行确定性评分 |
 | `passport_and_report_draft` | 冻结 Board、确定性分数和风险 | Passport draft 与 Markdown report | 报告只能引用已冻结数据，必须说明范围、缺口和非目标 |
 | `schema_validation` | 结构化草稿和版本化 schema | 验证结果与字段级错误 | 验证失败不得进入 Hash；错误进入有限修复 |
 | `repair_structured_output` | 验证错误和原始草稿 | 修复后的结构化草稿 | 最多两次；不得改变冻结证据或确定性分数 |
