@@ -707,3 +707,14 @@ def passport_draft(state: GraphState) -> dict[str, Any]:
         updates["passport_sequence"] = prov.get("passport_sequence")
 
     return updates
+
+
+def human_review_gate(state: GraphState) -> dict[str, Any]:
+    """Pause backend-associated runs after provenance freeze for a human decision."""
+    if get_backend_client() is None:
+        return {"current_node": "human_review_gate", "phase": "done"}
+    return {
+        "current_node": "human_review_gate",
+        "phase": "waiting_approval",
+        "approval_status": "waiting",
+    }

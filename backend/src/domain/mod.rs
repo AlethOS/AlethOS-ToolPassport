@@ -1,3 +1,4 @@
+mod approval;
 mod artifact;
 mod check_results;
 mod evidence;
@@ -8,6 +9,7 @@ mod run_event;
 mod tool;
 mod tool_identity;
 
+pub use approval::{Approval, ApprovalDecision, CreateApprovalRequest};
 pub use artifact::{Artifact, CreateArtifactRequest};
 pub use check_results::{
     CheckResult, CheckResults, CheckResultsSubmission, DimensionScore, DimensionScores, Finding,

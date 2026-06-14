@@ -89,7 +89,7 @@ class GraphState(BaseModel):
     profile_id: str | None = None
     profile_version: str | None = None
     # Orchestration state
-    phase: Literal["intake", "investigation", "evaluation", "done"] = "intake"
+    phase: Literal["intake", "investigation", "evaluation", "waiting_approval", "done"] = "intake"
     current_node: str = ""
     research_round: int = 0
     research_budget: ResearchBudget = Field(default_factory=ResearchBudget)

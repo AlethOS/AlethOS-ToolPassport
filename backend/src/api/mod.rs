@@ -17,11 +17,11 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Artifact, CheckResults,
-        CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
-        CreateToolRequest, Evidence, EvidenceFreezeResult, FreezeEvidenceBoardRequest,
-        FreezePassportRequest, PassportFreezeResult, ResolveToolRequest, Run, RunDetails, RunEvent,
-        Tool,
+        AddIdentifierRequest, AppendRunEventRequest, Approval, Artifact, CheckResults,
+        CheckResultsSubmission, CreateApprovalRequest, CreateArtifactRequest,
+        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, EvidenceFreezeResult,
+        FreezeEvidenceBoardRequest, FreezePassportRequest, PassportFreezeResult,
+        ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
     },
     repository::Repository,
     services::{
@@ -109,6 +109,10 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
             get(get_evidence_freeze),
         )
         .route("/api/runs/{run_id}/passport/freeze", post(freeze_passport))
+        .route(
+            "/api/runs/{run_id}/approval",
+            post(create_approval).get(get_approval),
+        )
         .route(
             "/api/runs/{run_id}/passport/{sequence}",
             get(get_passport_freeze),
@@ -220,6 +224,23 @@ async fn get_passport_freeze(
 ) -> ApiResult<Json<PassportFreezeResult>> {
     let freeze = state.service.get_passport_freeze(&run_id, sequence).await?;
     Ok(Json(freeze))
+}
+
+async fn create_approval(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<CreateApprovalRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<Approval>)> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let approval = state.service.create_approval(&run_id, request).await?;
+    Ok((StatusCode::CREATED, Json(approval)))
+}
+
+async fn get_approval(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Json<Approval>> {
+    Ok(Json(state.service.get_approval(&run_id).await?))
 }
 
 async fn create_tool(

@@ -312,6 +312,22 @@ export interface PassportFreezeResult {
   provenance: Provenance;
 }
 
+export type ApprovalDecision = "approve_offchain" | "approve_testnet_attestation" | "reject";
+
+export interface Approval {
+  approval_schema_version: "0.1.0";
+  approval_id: string;
+  run_id: string;
+  decision: ApprovalDecision;
+  passport_sequence: number;
+  passport_hash: string;
+  audit_log_hash: string;
+  evidence_manifest_hash: string;
+  chain_id: number | null;
+  registry_contract: string | null;
+  decided_at: string;
+}
+
 // ── Events list ─────────────────────────────────────────────────────
 
 export interface EventListResponse {

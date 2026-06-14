@@ -37,6 +37,7 @@ from .nodes import (
     gap_analysis,
     hypothesis_builder,
     hypothesis_builder_llm,
+    human_review_gate,
     intake_normalization,
     investigation_round,
     passport_draft,
@@ -103,6 +104,8 @@ def _decision_events(
         )]
     if node_id == "skeptic_review" and updates.get("review_issues"):
         return [("review_issue_found", {"issues": updates["review_issues"]})]
+    if node_id == "human_review_gate" and updates.get("approval_status") == "waiting":
+        return [("approval_required", {"passport_sequence": state.passport_sequence})]
     return []
 
 
@@ -129,14 +132,19 @@ def _instrument_node(
             )
             raise
 
-        for event_type, payload in _decision_events(node_id, state, updates):
-            _append_required_event(state, node_id, event_type, payload)
+        decision_events = _decision_events(node_id, state, updates)
+        for event_type, payload in decision_events:
+            if event_type != "approval_required":
+                _append_required_event(state, node_id, event_type, payload)
         _append_required_event(
             state,
             node_id,
             "node_finished",
             {"updated_fields": sorted(updates)},
         )
+        for event_type, payload in decision_events:
+            if event_type == "approval_required":
+                _append_required_event(state, node_id, event_type, payload)
         return updates
 
     return instrumented
@@ -203,6 +211,10 @@ def build_graph(*, use_llm: bool = False, checkpointer: Any = None) -> Any:
         _instrument_node("persist_check_results", persist_check_results),
     )
     builder.add_node("passport_draft", _instrument_node("passport_draft", passport_draft))
+    builder.add_node(
+        "human_review_gate",
+        _instrument_node("human_review_gate", human_review_gate),
+    )
 
     # Linear pre-investigation path
     builder.add_edge(START, "intake_normalization")
@@ -228,6 +240,7 @@ def build_graph(*, use_llm: bool = False, checkpointer: Any = None) -> Any:
     builder.add_edge("check_execution", "skeptic_review")
     builder.add_edge("skeptic_review", "persist_check_results")
     builder.add_edge("persist_check_results", "passport_draft")
-    builder.add_edge("passport_draft", END)
+    builder.add_edge("passport_draft", "human_review_gate")
+    builder.add_edge("human_review_gate", END)
 
     return builder.compile(checkpointer=checkpointer)

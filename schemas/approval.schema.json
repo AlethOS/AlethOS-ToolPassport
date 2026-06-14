@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alethos.local/schemas/approval.schema.json",
+  "title": "Human Approval",
+  "description": "Immutable human decision bound to the latest frozen Passport provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "approval_schema_version",
+    "approval_id",
+    "run_id",
+    "decision",
+    "passport_sequence",
+    "passport_hash",
+    "audit_log_hash",
+    "evidence_manifest_hash",
+    "chain_id",
+    "registry_contract",
+    "decided_at"
+  ],
+  "properties": {
+    "approval_schema_version": { "const": "0.1.0" },
+    "approval_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "decision": {
+      "enum": ["approve_offchain", "approve_testnet_attestation", "reject"]
+    },
+    "passport_sequence": { "type": "integer", "minimum": 1 },
+    "passport_hash": { "$ref": "#/$defs/sha256" },
+    "audit_log_hash": { "$ref": "#/$defs/sha256" },
+    "evidence_manifest_hash": { "$ref": "#/$defs/sha256" },
+    "chain_id": { "type": ["integer", "null"], "minimum": 1 },
+    "registry_contract": {
+      "type": ["string", "null"],
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "decided_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    }
+  }
+}

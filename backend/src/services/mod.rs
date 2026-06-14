@@ -9,10 +9,11 @@ use uuid::Uuid;
 
 use crate::{
     domain::{
-        AddIdentifierRequest, AppendRunEventRequest, Artifact, AuditBinding, CheckResults,
-        CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
-        CreateToolRequest, Evidence, EvidenceFreezeResult, EvidenceManifestEntry,
-        ExternalIdentifier, FreezeEvidenceBoardRequest, FreezePassportRequest, FrozenEvidenceBoard,
+        AddIdentifierRequest, AppendRunEventRequest, Approval, ApprovalDecision, Artifact,
+        AuditBinding, CheckResults, CheckResultsSubmission, CreateApprovalRequest,
+        CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest, CreateToolRequest,
+        Evidence, EvidenceFreezeResult, EvidenceManifestEntry, ExternalIdentifier,
+        FreezeEvidenceBoardRequest, FreezePassportRequest, FrozenEvidenceBoard,
         FrozenEvidenceManifest, Passport, PassportDimensionScores, PassportFreezeResult,
         PassportRisk, PassportScores, PassportStatement, Provenance, ReasonCode, Recommendation,
         ResolutionResponse, ResolutionStatus, ResolveToolRequest, Run, RunDetails, RunEvent,
@@ -50,6 +51,10 @@ pub enum ServiceError {
     PassportAlreadyFrozen,
     #[error("passport sequence is not frozen")]
     PassportNotFound,
+    #[error("approval already exists")]
+    ApprovalAlreadyExists,
+    #[error("approval not found")]
+    ApprovalNotFound,
     #[error("tool not found")]
     ToolNotFound,
     #[error("invalid tool ID format")]
@@ -1044,6 +1049,99 @@ impl TrustCoreService {
             .await?
             .ok_or(ServiceError::PassportNotFound)
     }
+
+    pub async fn create_approval(
+        &self,
+        run_id: &str,
+        request: CreateApprovalRequest,
+    ) -> Result<Approval, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        let run = self
+            .repository
+            .get_run(run_id)
+            .await?
+            .ok_or(ServiceError::RunNotFound)?;
+        if run.status != RunStatus::WaitingApproval {
+            return Err(ServiceError::Conflict(
+                "run must be waiting_approval before a decision is recorded".to_owned(),
+            ));
+        }
+        validate_approval_request(&request)?;
+
+        let sequence = self
+            .repository
+            .next_passport_sequence(run_id)
+            .await?
+            .saturating_sub(1);
+        let freeze = self
+            .repository
+            .get_passport_freeze(run_id, sequence)
+            .await?
+            .ok_or(ServiceError::PassportNotFound)?;
+        if request.passport_sequence != freeze.passport.passport_sequence
+            || request.passport_hash != freeze.provenance.passport_hash
+            || request.audit_log_hash != freeze.provenance.audit_log_hash
+            || request.evidence_manifest_hash != freeze.provenance.evidence_manifest_hash
+        {
+            return Err(ServiceError::Conflict(
+                "approval binding does not match the latest frozen provenance".to_owned(),
+            ));
+        }
+
+        let decided_at = Utc::now();
+        let approval = Approval {
+            approval_schema_version: "0.1.0".to_owned(),
+            approval_id: Uuid::new_v4(),
+            run_id,
+            decision: request.decision,
+            passport_sequence: request.passport_sequence,
+            passport_hash: request.passport_hash,
+            audit_log_hash: request.audit_log_hash,
+            evidence_manifest_hash: request.evidence_manifest_hash,
+            chain_id: request.chain_id,
+            registry_contract: request.registry_contract,
+            decided_at,
+        };
+        let next_status = match approval.decision {
+            ApprovalDecision::ApproveOffchain => RunStatus::Success,
+            ApprovalDecision::ApproveTestnetAttestation => RunStatus::Running,
+            ApprovalDecision::Reject => RunStatus::Failed,
+        };
+        let event = generated_event(
+            run_id,
+            RunEventType::ApprovalResolved,
+            json!({
+                "approval_id": approval.approval_id,
+                "decision": approval.decision.as_str(),
+                "passport_sequence": approval.passport_sequence,
+                "chain_id": approval.chain_id,
+                "registry_contract": approval.registry_contract,
+            }),
+        );
+        let approval = self
+            .repository
+            .create_approval(&approval, &event, run.status, next_status)
+            .await
+            .map_err(|error| match error {
+                RepositoryError::UniqueViolation => ServiceError::ApprovalAlreadyExists,
+                RepositoryError::RunStateChanged => {
+                    ServiceError::Conflict("run state changed while recording approval".to_owned())
+                }
+                other => ServiceError::Repository(other),
+            })?;
+        self.broadcaster
+            .broadcast(run_id, event_to_sse_json(&event));
+        Ok(approval)
+    }
+
+    pub async fn get_approval(&self, run_id: &str) -> Result<Approval, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        ensure_run_exists(&self.repository, run_id).await?;
+        self.repository
+            .get_approval(run_id)
+            .await?
+            .ok_or(ServiceError::ApprovalNotFound)
+    }
 }
 
 struct EventProjection {
@@ -1061,6 +1159,7 @@ fn event_projection(
         RunEventType::RunCreated
         | RunEventType::EvidenceBoardFrozen
         | RunEventType::ScoreChanged
+        | RunEventType::ApprovalResolved
         | RunEventType::ProvenanceFrozen => Err(ServiceError::InvalidRequest(format!(
             "{} is generated by the Rust trust core",
             request.event_type.as_str()
@@ -1083,13 +1182,6 @@ fn event_projection(
             ensure_status(run.status, &[RunStatus::Running])?;
             Ok(EventProjection {
                 status: Some(RunStatus::WaitingApproval),
-                current_node: current_node(),
-            })
-        }
-        RunEventType::ApprovalResolved => {
-            ensure_status(run.status, &[RunStatus::WaitingApproval])?;
-            Ok(EventProjection {
-                status: Some(RunStatus::Running),
                 current_node: current_node(),
             })
         }
@@ -1516,6 +1608,60 @@ fn validate_create_run(request: &CreateRunRequest) -> Result<(), ServiceError> {
 
 fn validate_append_event(request: &AppendRunEventRequest) -> Result<(), ServiceError> {
     validate_required("node_id", &request.node_id, 200)
+}
+
+fn validate_approval_request(request: &CreateApprovalRequest) -> Result<(), ServiceError> {
+    if request.approval_schema_version != "0.1.0" {
+        return Err(ServiceError::InvalidRequest(
+            "approval_schema_version must be 0.1.0".to_owned(),
+        ));
+    }
+    validate_passport_sequence(request.passport_sequence)?;
+    for (field, value) in [
+        ("passport_hash", &request.passport_hash),
+        ("audit_log_hash", &request.audit_log_hash),
+        ("evidence_manifest_hash", &request.evidence_manifest_hash),
+    ] {
+        if value.len() != 66
+            || !value.starts_with("0x")
+            || !value[2..]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+        {
+            return Err(ServiceError::InvalidRequest(format!(
+                "{field} must be a 0x-prefixed 32-byte hash"
+            )));
+        }
+    }
+
+    match request.decision {
+        ApprovalDecision::ApproveTestnetAttestation => {
+            if request.chain_id != Some(11_155_111) {
+                return Err(ServiceError::InvalidRequest(
+                    "testnet attestation approval requires Sepolia chain_id 11155111".to_owned(),
+                ));
+            }
+            let address = request.registry_contract.as_deref().unwrap_or_default();
+            if address.len() != 42
+                || !address.starts_with("0x")
+                || !address[2..]
+                    .chars()
+                    .all(|character| character.is_ascii_hexdigit())
+            {
+                return Err(ServiceError::InvalidRequest(
+                    "testnet attestation approval requires a valid registry_contract".to_owned(),
+                ));
+            }
+        }
+        ApprovalDecision::ApproveOffchain | ApprovalDecision::Reject => {
+            if request.chain_id.is_some() || request.registry_contract.is_some() {
+                return Err(ServiceError::InvalidRequest(
+                    "offchain approval and rejection must not include chain parameters".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_required(field: &str, value: &str, max_length: usize) -> Result<(), ServiceError> {

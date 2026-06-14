@@ -122,7 +122,7 @@ describe("TrustControlDesk", () => {
     const user = userEvent.setup();
     renderDesk();
 
-    expect(await screen.findByText("This run is waiting for a human decision. No approval write action is available in this read-only slice.")).toBeInTheDocument();
+    expect(await screen.findByText("Review the frozen commitments before recording an immutable decision.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Findings" }));
@@ -176,6 +176,52 @@ describe("TrustControlDesk", () => {
     expect(screen.getByText("Capability clarity")).toBeInTheDocument();
     expect(screen.getByText("41", { selector: ".score-block > strong" })).toBeInTheDocument();
     expect(screen.queryByText("Pass with conditions")).not.toBeInTheDocument();
+  });
+
+  it("submits an offchain approval bound to frozen provenance", async () => {
+    let approvalBody: Record<string, unknown> | null = null;
+    const provenanceEvent: RunEvent = {
+      ...events[0],
+      event_type: "provenance_frozen",
+      payload: { passport_sequence: 1 },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
+        if (path === "/api/trust-core/runs") return response({ runs: [waitingRun] });
+        if (path.includes("/passport/1")) {
+          return response({
+            passport: { passport_sequence: 1 },
+            provenance: {
+              passport_hash: `0x${"1".repeat(64)}`,
+              audit_log_hash: `0x${"2".repeat(64)}`,
+              evidence_manifest_hash: `0x${"3".repeat(64)}`,
+            },
+          });
+        }
+        if (path.endsWith("/approval")) {
+          approvalBody = JSON.parse(String(init?.body));
+          return response({ approval_id: "approval-1" }, 201);
+        }
+        if (path.includes("/check-results")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: waitingRun, events: [provenanceEvent] });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderDesk();
+    await user.click(await screen.findByRole("button", { name: "Approve offchain" }));
+    await waitFor(() => expect(approvalBody).not.toBeNull());
+    expect(approvalBody).toMatchObject({
+      decision: "approve_offchain",
+      passport_sequence: 1,
+      chain_id: null,
+      registry_contract: null,
+    });
   });
 
   it("filters authoritative run rows and selects a different run", async () => {

@@ -34,6 +34,7 @@ import { useEffect, useMemo, useState, type ComponentType, type CSSProperties } 
 
 import { ExecutionFlow, ProvenanceFlow } from "@/components/flow-panels";
 import {
+  createApproval,
   createRun,
   createTool,
   getEvidenceBoard,
@@ -48,6 +49,7 @@ import {
 import { translate, type TranslationKey } from "@/lib/i18n";
 import type {
   CheckResults,
+  ApprovalDecision,
   DashboardTab,
   EvidenceFreezeResult,
   Locale,
@@ -232,6 +234,25 @@ export function TrustControlDesk() {
     enabled: Boolean(activeRunId && passportSequence),
   });
   const passportFreeze: PassportFreezeResult | null = passportQuery.data ?? null;
+  const approvalMutation = useMutation({
+    mutationFn: async ({ decision, registryContract }: { decision: ApprovalDecision; registryContract?: string }) => {
+      if (!activeRunId || !passportFreeze) throw new Error("Frozen Passport provenance is required");
+      return createApproval(activeRunId, {
+        approval_schema_version: "0.1.0",
+        decision,
+        passport_sequence: passportFreeze.passport.passport_sequence,
+        passport_hash: passportFreeze.provenance.passport_hash,
+        audit_log_hash: passportFreeze.provenance.audit_log_hash,
+        evidence_manifest_hash: passportFreeze.provenance.evidence_manifest_hash,
+        chain_id: decision === "approve_testnet_attestation" ? 11_155_111 : null,
+        registry_contract: decision === "approve_testnet_attestation" ? registryContract ?? null : null,
+      });
+    },
+    onSuccess: () => {
+      void runsQuery.refetch();
+      void detailsQuery.refetch();
+    },
+  });
 
   const filteredRuns = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -323,6 +344,10 @@ export function TrustControlDesk() {
               error={detailsQuery.isError}
               locale={locale}
               openFindings={() => setTab("findings")}
+              canApprove={Boolean(passportFreeze)}
+              approvalPending={approvalMutation.isPending}
+              approvalError={approvalMutation.error?.message ?? null}
+              decide={(decision, registryContract) => approvalMutation.mutate({ decision, registryContract })}
             />
           </div>
         </main>
@@ -837,6 +862,10 @@ function TrustInspector({
   error,
   locale,
   openFindings,
+  canApprove,
+  approvalPending,
+  approvalError,
+  decide,
 }: {
   t: (key: TranslationKey) => string;
   run: Run | null;
@@ -845,7 +874,12 @@ function TrustInspector({
   error: boolean;
   locale: Locale;
   openFindings: () => void;
+  canApprove: boolean;
+  approvalPending: boolean;
+  approvalError: string | null;
+  decide: (decision: ApprovalDecision, registryContract?: string) => void;
 }) {
+  const [registryContract, setRegistryContract] = useState("");
   return (
     <aside className="panel inspector">
       <PanelTitle title={t("trustInspector")} authority={t("authoritative")} />
@@ -881,6 +915,21 @@ function TrustInspector({
           <section className="inspector-section review-boundary">
             <h2><ShieldCheck size={16} />{t("humanReviewBoundary")}</h2>
             <p>{run?.status === "waiting_approval" ? t("humanReviewRequired") : t("noHumanReview")}</p>
+            {run?.status === "waiting_approval" && canApprove && (
+              <div className="approval-actions">
+                <input
+                  aria-label={t("registryContract")}
+                  placeholder="0x..."
+                  value={registryContract}
+                  onChange={(event) => setRegistryContract(event.target.value)}
+                  disabled={approvalPending}
+                />
+                <button disabled={approvalPending} onClick={() => decide("approve_offchain")}>{t("approveOffchain")}</button>
+                <button disabled={approvalPending || !registryContract} onClick={() => decide("approve_testnet_attestation", registryContract)}>{t("approveSepolia")}</button>
+                <button disabled={approvalPending} onClick={() => decide("reject")}>{t("rejectRun")}</button>
+                {approvalError && <p className="text-danger">{approvalError}</p>}
+              </div>
+            )}
             <button onClick={openFindings}>{t("openFindings")}<ChevronRight size={15} /></button>
           </section>
         </>

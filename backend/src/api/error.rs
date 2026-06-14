@@ -117,6 +117,18 @@ impl From<ServiceError> for ApiError {
                 error.to_string(),
                 json!({}),
             ),
+            ServiceError::ApprovalAlreadyExists => Self::new(
+                StatusCode::CONFLICT,
+                "approval_already_exists",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::ApprovalNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "approval_not_found",
+                error.to_string(),
+                json!({}),
+            ),
             ServiceError::ToolNotFound => Self::new(
                 StatusCode::NOT_FOUND,
                 "tool_not_found",

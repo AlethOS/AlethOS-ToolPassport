@@ -10,7 +10,7 @@ import pytest
 from toolpassport_orchestrator.backend_client import BackendClient, set_backend_client
 from toolpassport_orchestrator.fixtures import MOCK_TOOL
 from toolpassport_orchestrator.graph import _instrument_node
-from toolpassport_orchestrator.nodes import persist_check_results, skeptic_review
+from toolpassport_orchestrator.nodes import human_review_gate, persist_check_results, skeptic_review
 from toolpassport_orchestrator.state import CheckFinding, FrozenBoardRef, GraphState
 
 
@@ -111,3 +111,19 @@ def test_skeptic_reviewed_findings_are_submitted_for_rust_scoring() -> None:
     )
     assert submitted["finding"] == "partial"
     assert updates["check_results_ref"]["check_results_id"].startswith("reviewed-results-")
+
+
+def test_human_gate_finishes_before_requesting_approval() -> None:
+    backend = FakeBackend()
+    set_backend_client(cast(BackendClient, backend))
+
+    updates = _instrument_node("human_review_gate", human_review_gate)(
+        _state(passport_sequence=1)
+    )
+
+    assert updates["approval_status"] == "waiting"
+    assert [event_type for _, event_type, _ in backend.events] == [
+        "node_started",
+        "node_finished",
+        "approval_required",
+    ]

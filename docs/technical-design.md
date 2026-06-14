@@ -281,9 +281,9 @@ Run binding 和已保存 Evidence/Artifact 补全权威字段，规范化 set-li
 Rust-owned `evidence_board_frozen` 事件。`POST /api/runs/:run_id/check-results`
 要求引用已冻结 Board，并且 finding 只能引用该 Board 中的 Evidence；结果与
 Rust-owned `score_changed` 事件在同一事务中保存。通用 Event API 不允许伪造这两类
-Trust Core 事件。由于可信人工审批持久化尚未实现，API 当前不批准
-任何规则要求人工批准的 `not_applicable`；无副作用评分核心仍保留显式可信批准集合
-输入，供后续人工审批 API 接入。`POST /api/runs/:run_id/passport/freeze` 只接受
+Trust Core 事件。可信人工审批现已通过专用 API 持久化，但当前审批对象是冻结
+Passport provenance，不直接批准单个 `not_applicable`；无副作用评分核心仍保留显式
+可信批准集合输入，供后续 check 级审批接入。`POST /api/runs/:run_id/passport/freeze` 只接受
 不可信 Passport 内容（不含 Hash 或 Rust-owned scores）；Rust 从 Run binding、
 已冻结 Board/Manifest 和 Check Results 构建完整 Passport v0.2，通过 JCS + SHA-256
 计算 `passport_hash` 和 `evidence_manifest_hash`，从规范 Run UUID 字符串计算
@@ -691,7 +691,8 @@ web3/         Alloy client 和 Registry 调用
 | Partial | `POST /api/runs/:run_id/check-results` | 从 Run 绑定与数据库 Evidence 验证 finding，计算并原子保存不可修改的分数和 `score_changed` 事件；需要人工批准的 N/A 当前关闭，且待冻结 Board 持久化后验证 board version |
 | Target | `POST /api/runs/:run_id/freeze` | 冻结 Board、provenance 和 Passport |
 | Target | `GET /api/passports/:passport_id` | 返回不可变 Passport |
-| Target | `POST /api/runs/:run_id/approval` | 保存绑定 Hash 的人工决定 |
+| Implemented | `POST /api/runs/:run_id/approval` | 原子保存绑定最新冻结 Hash 的不可变人工决定和 `approval_resolved` 事件 |
+| Implemented | `GET /api/runs/:run_id/approval` | 返回该 Run 的不可变人工决定 |
 | Target | `POST /api/runs/:run_id/attest` | 在有效批准后提交测试网交易 |
 
 所有响应使用 JSON，SSE 除外。错误响应至少包含稳定 `code`、可读 `message` 和结构化 `details`。
@@ -745,7 +746,8 @@ Tool Index 按规范 Tool 聚合审计历史，允许用户查看同一工具的
 后端启动调查。Overview、Findings、Evidence、Execution 与 Provenance 只展示 Rust
 返回的权威数据；未产生 Check Results、冻结 Board 或冻结 Passport 时展示明确待生成
 状态，不回退到示例分数、findings、Hash 或 provenance。尚未实现的导航入口仍明确标记
-为 Preview。当前 Dashboard 不提供追加 Event、审批、签名或链上写入。
+为 Preview。当前 Dashboard 可在 `waiting_approval` 状态记录链下批准、Sepolia
+attestation 批准或拒绝；不提供签名或链上写入。
 
 ## 12. 安全与外部访问边界
 
@@ -786,7 +788,7 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 | Passport 与评分 | 已发布严格 Passport v0.2、Check Result submission/stored、冻结 Board/Manifest 与 Provenance 契约，并实现 Rust 确定性评分核心、Run catalog 绑定、冻结 Board/Manifest、四个承诺 Hash 与 Passport/Provenance 冻结持久化/API | Partial；推理输入与 Rust-owned totals 已分离，可信 N/A 人工批准仍待实现 |
 | `web3_attestation` | 历史 v0.1 保留该字段；v0.2 已移除并发布独立 Receipt schema | Contract resolved；Receipt 持久化与测试网提交仍待 Stage 8 |
 | Audit Log Hash | 已实现按 sequence 序的 JCS+SHA-256 哈希链 | Resolved；`auditLogHash` 定义为 `provenance_frozen` 事件哈希，Stage 6 实现冻结边界 |
-| Dashboard | 已实现双语 Trust Control Desk、Run/Event 轮询、创建调查，以及真实 Board/Score/Hash/Passport/Execution/Provenance 只读视图 | Partial；尚无 approval UI、签名或链上写入 |
+| Dashboard | 已实现双语 Trust Control Desk、Run/Event 轮询、创建调查、真实冻结产物视图和绑定 provenance 的 approval UI | Partial；尚无签名或链上写入 |
 | Registry | 最小 commitment 合约和 Foundry tests 已实现 | Compatible；按 `toolId -> runId` 聚合，并保存三个 Hash、auditor 和 timestamp；链下 Tool Registry 仍待实现 |
 | README | 已准确标记当前未实现能力 | Compatible；实现每个迁移阶段后继续同步 |
 

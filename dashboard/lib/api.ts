@@ -1,5 +1,7 @@
 import type {
   ApiErrorBody,
+  Approval,
+  ApprovalDecision,
   ArtifactListResponse,
   CheckResults,
   EventListResponse,
@@ -142,4 +144,20 @@ export function createRun(goal: string, toolId: string): Promise<Run> {
 
 export function launchInvestigation(runId: string): Promise<{ status: string; pid: number }> {
   return postJson(`/api/trust-core/runs/${encodeURIComponent(runId)}/investigate`, {});
+}
+
+export function createApproval(
+  runId: string,
+  request: {
+    approval_schema_version: "0.1.0";
+    decision: ApprovalDecision;
+    passport_sequence: number;
+    passport_hash: string;
+    audit_log_hash: string;
+    evidence_manifest_hash: string;
+    chain_id: number | null;
+    registry_contract: string | null;
+  },
+): Promise<Approval> {
+  return postJson(`/api/trust-core/runs/${encodeURIComponent(runId)}/approval`, request);
 }

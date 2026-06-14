@@ -176,20 +176,24 @@ async fn projects_approval_and_terminal_status_events() {
 
     let approval_resolved =
         append_event(&router, &run_id, "human_review_gate", "approval_resolved").await;
-    assert_eq!(approval_resolved.0, StatusCode::CREATED);
+    assert_error(
+        &approval_resolved,
+        StatusCode::BAD_REQUEST,
+        "invalid_request",
+    );
 
     let finished = append_event_with_payload(
         &router,
         &run_id,
         "finish",
         "run_status_changed",
-        json!({"status": "success"}),
+        json!({"status": "failed"}),
     )
     .await;
     assert_eq!(finished.0, StatusCode::CREATED);
 
     let details = get_run(&router, &run_id).await;
-    assert_eq!(details.1["run"]["status"], "success");
+    assert_eq!(details.1["run"]["status"], "failed");
     assert_eq!(details.1["run"]["current_node"], "finish");
 }
 
