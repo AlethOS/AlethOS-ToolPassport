@@ -339,7 +339,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | `intake_normalization` | 已绑定 `tool_id` 的 Run、用户目标、用户审计指令、URL、本地材料引用和运行策略 | 规范化 Tool Intake、结构化指令约束、允许来源、预算和限制 | 缺少规范 Tool 或目标 revision 状态时拒绝启动；拒绝空目标、非法 URL、未授权文件和主网请求；验证审计指令不违反标准框架约束；不读取 `.env` |
 | `tool_fingerprint` | Tool Intake 和初始来源 | 候选工具类型、置信度和依据 | 不把用户声明当作唯一分类依据；无法判断时标记未知 |
-| `profile_selector` | 候选类型和版本化 Profile catalog | 绑定的 Profile ID/version 或人工选择请求 | 不得临时创建 checks；Profile 切换必须生成事件并重建计划 |
+| `profile_selector` | Rust Run 快照中的候选类型和版本化 Profile 绑定 | 已验证且保持不变的 Profile ID/version，或人工选择请求 | 后端关联运行必须保留 Run 的 Standard/Profile version；不得临时创建 checks；Profile 切换必须生成事件并重建计划 |
 | `audit_plan_builder` | 标准、Profile、目标、结构化指令约束、预算 | 分阶段计划、来源策略、优先级和停止条件 | 高风险 checks 优先；指令可调整优先级排序和假设方向，但不能跳过强制高风险检查或创建非版本化检查项；计划必须在预算内并允许恢复 |
 | `hypothesis_builder` | Profile checks、结构化指令约束和已知材料 | 待验证 claims、风险假设和初始 Gap Tracker | 假设必须对应 check 或明确审计目标，指令可引导假设方向但禁止无范围扩张 |
 | `source_discovery` | 当前高优先级 gaps | 候选来源、查询目的和预期证据类型 | 优先官方与可定位来源；搜索摘要只能用于发现，不是最终证据 |
@@ -348,7 +348,7 @@ flowchart TD
 | `claim_evidence_mapping` | Evidence Board、checks、新证据 | 支持与反证关系、claim 状态和置信度建议 | 每个 finding 必须引用 evidence 或明确缺口；冲突证据不得删除 |
 | `gap_analysis` | Evidence Board、Profile 和预算 | 按影响排序的 gaps、覆盖率和停止建议 | 优先高权重与高风险缺口；不得为低价值问题无限调研 |
 | `next_query_planning` | gaps 和已尝试查询 | 下一轮查询计划或停止理由 | 必须避免无变化重复查询；重复失败升级为人工决定或有限结论 |
-| `freeze_evidence_board` | 当前 Board、gaps 和范围 | 不可变 Board version 与冻结摘要 | 冻结后不能静默追加证据；继续调研创建新 Board version |
+| `freeze_evidence_board` | 当前 Board、gaps 和范围 | 不可变 Board version 与冻结摘要 | Rust 拒绝或不可用时图必须 fail closed，禁止继续评分或请求审批；冻结后不能静默追加证据；继续调研创建新 Board version |
 | `check_execution` | 冻结 Board 和 Profile rules | 每个 check 的候选 finding、理由和 evidence IDs | GLM 只提出 finding，不得在 skeptic review 前触发权威评分 |
 | `risk_register_builder` | Check findings 和权限 taxonomy | 风险、影响、缓解建议和人工检查项 | 文件、Shell、密钥、钱包、数据库写入和费用风险必须显式处理 |
 | `counter_evidence_search` | 高分 claims、高风险项和冲突 | 反证查询与结果 | 每个高风险权限至少一轮；不得仅搜索支持性材料 |
@@ -359,7 +359,7 @@ flowchart TD
 | `schema_validation` | 结构化草稿和版本化 schema | 验证结果与字段级错误 | 验证失败不得进入 Hash；错误进入有限修复 |
 | `repair_structured_output` | 验证错误和原始草稿 | 修复后的结构化草稿 | 最多两次；不得改变冻结证据或确定性分数 |
 | `provenance_freeze` | 有效 Passport、Board、事件和版本 | 三个内容 Hash、链上 `runId` 和 provenance Artifact | 仅 Rust 可执行；冻结后修改必须生成新版本 |
-| `human_review_gate` | 冻结 commitment、报告、缺口和风险 | 继续调研、链下批准、上链批准或拒绝 | 决定必须绑定 Tool、Run、Board version、Hash、chain 和 contract |
+| `human_review_gate` | 已由 Rust 冻结的 commitment、报告、缺口和风险 | 继续调研、链下批准、上链批准或拒绝 | 缺少 Passport sequence/provenance 时禁止请求审批；决定必须绑定 Tool、Run、Board version、Hash、chain 和 contract |
 | `attest_onchain` | 有效批准和冻结 commitment | 独立 Attestation Receipt | 仅 Rust 执行；禁止自动重发；失败回到人工决定 |
 
 ### 5.2 调查预算与停止条件

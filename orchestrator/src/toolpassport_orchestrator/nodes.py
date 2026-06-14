@@ -5,8 +5,9 @@ Most nodes use mock/fixture data; ``hypothesis_builder_llm`` optionally calls
 GLM via the LLM adapter for richer gap descriptions.
 
 When a ``BackendClient`` is configured (via ``backend_client.set_backend_client``),
-nodes that create evidence, artifacts, or events will persist them to the Rust
-Trust Core. On failure they fall back to mock data.
+nodes persist trust-boundary outputs to the Rust Trust Core. Freeze, scoring,
+Passport, and required-event failures stop the graph instead of falling through
+to approval.
 """
 
 from __future__ import annotations
@@ -94,12 +95,16 @@ def profile_selector(state: GraphState) -> dict[str, Any]:
         profile_id = tool_type
     else:
         profile_id = "generic"
+    if state.profile_id is not None and state.profile_id != profile_id:
+        raise ValueError(
+            f"selected profile {profile_id} does not match Run binding {state.profile_id}"
+        )
 
     return {
         "current_node": "profile_selector",
         "profile_id": profile_id,
-        "profile_version": "0.2.0",
-        "standard_version": "0.2.0",
+        "profile_version": state.profile_version or "0.2.0",
+        "standard_version": state.standard_version,
     }
 
 
@@ -473,8 +478,8 @@ def freeze_evidence_board(state: GraphState) -> dict[str, Any]:
                 "statement": f"Evidence from {ev.title}",
                 "status": "supported",
                 "confidence": 0.7,
-                "supports": ev.supports,
-                "contradicts": ev.contradicts,
+                "supports": [ev.evidence_id],
+                "contradicts": [],
             })
 
     evidence_ids = [ev.evidence_id for ev in state.evidence_board]
@@ -489,12 +494,13 @@ def freeze_evidence_board(state: GraphState) -> dict[str, Any]:
     }
 
     result = backend.freeze_evidence_board(state.run_id, request)
-    if result is not None:
-        board = result.get("evidence_board", {})
-        updates["frozen_board"] = {
-            "version": board.get("version", 1),
-            "frozen_at": board.get("frozen_at", ""),
-        }
+    if result is None:
+        raise RuntimeError("Rust Trust Core rejected the Evidence Board freeze")
+    board = result.get("evidence_board", {})
+    updates["frozen_board"] = {
+        "version": board.get("version", 1),
+        "frozen_at": board.get("frozen_at", ""),
+    }
 
     return updates
 
@@ -546,8 +552,10 @@ def persist_check_results(state: GraphState) -> dict[str, Any]:
     }
 
     backend = get_backend_client()
-    if backend is None or state.frozen_board is None:
+    if backend is None:
         return updates
+    if state.frozen_board is None:
+        raise RuntimeError("cannot persist Check Results before Evidence Board freeze")
 
     finding_submissions: list[dict[str, Any]] = []
     for f in state.check_findings:
@@ -567,13 +575,14 @@ def persist_check_results(state: GraphState) -> dict[str, Any]:
     }
 
     result = backend.submit_check_results(state.run_id, check_submission)
-    if result is not None:
-        updates["check_results_ref"] = {
-            "check_results_id": result.get("check_results_id", ""),
-            "evidence_board_version": result.get("evidence_board_version", 1),
-            "total_score": result.get("total_score", 0),
-            "rating": result.get("rating", ""),
-        }
+    if result is None:
+        raise RuntimeError("Rust Trust Core rejected the reviewed Check Results")
+    updates["check_results_ref"] = {
+        "check_results_id": result.get("check_results_id", ""),
+        "evidence_board_version": result.get("evidence_board_version", 1),
+        "total_score": result.get("total_score", 0),
+        "rating": result.get("rating", ""),
+    }
 
     return updates
 
@@ -665,13 +674,16 @@ def passport_draft(state: GraphState) -> dict[str, Any]:
     }
     updates: dict[str, Any] = {
         "current_node": "passport_draft",
-        "phase": "done",
+        "phase": "evaluation",
         "passport_draft": draft,
     }
 
     backend = get_backend_client()
-    if backend is None or state.frozen_board is None:
+    if backend is None:
+        updates["phase"] = "done"
         return updates
+    if state.frozen_board is None or state.check_results_ref is None:
+        raise RuntimeError("cannot freeze Passport before Board and Check Results persist")
 
     # Build a minimal FreezePassportRequest from the draft data.
     passport_request: dict[str, Any] = {
@@ -702,9 +714,11 @@ def passport_draft(state: GraphState) -> dict[str, Any]:
     }
 
     result = backend.freeze_passport(state.run_id, passport_request)
-    if result is not None:
-        prov = result.get("provenance", {})
-        updates["passport_sequence"] = prov.get("passport_sequence")
+    if result is None:
+        raise RuntimeError("Rust Trust Core rejected the Passport freeze")
+    prov = result.get("provenance", {})
+    updates["passport_sequence"] = prov.get("passport_sequence")
+    updates["phase"] = "done"
 
     return updates
 
@@ -713,6 +727,8 @@ def human_review_gate(state: GraphState) -> dict[str, Any]:
     """Pause backend-associated runs after provenance freeze for a human decision."""
     if get_backend_client() is None:
         return {"current_node": "human_review_gate", "phase": "done"}
+    if state.passport_sequence is None:
+        raise RuntimeError("cannot request approval before provenance freeze")
     return {
         "current_node": "human_review_gate",
         "phase": "waiting_approval",
