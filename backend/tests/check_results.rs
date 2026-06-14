@@ -345,6 +345,50 @@ async fn api_only_accepts_evidence_from_the_same_run() {
     assert_error(&rejected, StatusCode::BAD_REQUEST, "invalid_request");
 }
 
+#[tokio::test]
+async fn api_get_latest_check_results_returns_persisted_results() {
+    let app = test_app().await;
+    let run_id = create_run(&app.router).await;
+    let evidence_id = create_evidence(&app.router, &run_id).await;
+    freeze_board(&app.router, &run_id, vec![json!(evidence_id)]).await;
+
+    // No check results yet — GET returns 404.
+    let (get_status, _get_body) = send_json(
+        &app.router,
+        Method::GET,
+        &format!("/api/runs/{run_id}/check-results"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(get_status, StatusCode::NOT_FOUND);
+
+    // Create check results.
+    let (create_status, _) = post_results(
+        &app.router,
+        &run_id,
+        all_findings("pass", Some(&evidence_id)),
+    )
+    .await;
+    assert_eq!(create_status, StatusCode::CREATED);
+
+    // Now GET returns the check results.
+    let (get_status, get_body) = send_json(
+        &app.router,
+        Method::GET,
+        &format!("/api/runs/{run_id}/check-results"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(get_status, StatusCode::OK);
+    assert_eq!(get_body["check_results_id"].as_str().unwrap().len(), 36); // UUID
+    assert!(get_body["total_score"].as_u64().is_some());
+    assert!(get_body["rating"].as_str().is_some_and(|r| !r.is_empty()));
+    assert_eq!(
+        get_body["results"].as_array().unwrap().len(),
+        7 // generic@0.3.0 has 7 checks
+    );
+}
+
 async fn test_app() -> TestApp {
     let options = SqliteConnectOptions::from_str("sqlite::memory:")
         .unwrap()

@@ -166,6 +166,8 @@ const en = {
   eventDirectivesAccepted: "Directives accepted",
   eventHumanFeedbackReceived: "Human feedback received",
   eventProvenanceFrozen: "Provenance frozen",
+  deterministicScore: "Deterministic score",
+  checks: "checks",
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
@@ -334,6 +336,8 @@ const zh: Record<keyof typeof en, string> = {
   eventDirectivesAccepted: "指令已接受",
   eventHumanFeedbackReceived: "已收到人工反馈",
   eventProvenanceFrozen: "溯源已冻结",
+  deterministicScore: "确定性评分",
+  checks: "检查项",
 };
 
 export type TranslationKey = keyof typeof en;

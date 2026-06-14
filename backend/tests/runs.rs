@@ -1057,3 +1057,99 @@ fn assert_error(response: &(StatusCode, Value), status: StatusCode, code: &str) 
     );
     assert!(response.1["details"].is_object());
 }
+
+// ── GET /api/runs/{run_id}/events ──────────────────────────────────
+
+#[tokio::test]
+async fn get_events_endpoint_returns_all_events() {
+    let (router, _pool) = test_app().await;
+    let tool_id = create_github_tool(&router).await;
+    let run_id = create_run(&router, &tool_id).await;
+
+    // Append two user events.
+    let _ev1 = append_event(&router, &run_id, "intake", "node_started").await;
+    let _ev2 = append_event(&router, &run_id, "intake", "node_finished").await;
+
+    // GET /api/runs/{run_id}/events
+    let (status, body) = send(
+        &router,
+        Method::GET,
+        &format!("/api/runs/{run_id}/events"),
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let events = body["events"].as_array().expect("events must be an array");
+    // run_created (sequence 0) + node_started (1) + node_finished (2)
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0]["event_type"], "run_created");
+    assert_eq!(events[1]["event_type"], "node_started");
+    assert_eq!(events[2]["event_type"], "node_finished");
+}
+
+#[tokio::test]
+async fn get_events_endpoint_rejects_missing_run() {
+    let (router, _pool) = test_app().await;
+    let fake_id = Uuid::new_v4().to_string();
+    let (status, body) = send(
+        &router,
+        Method::GET,
+        &format!("/api/runs/{fake_id}/events"),
+        Body::empty(),
+    )
+    .await;
+    assert_error(&(status, body), StatusCode::NOT_FOUND, "run_not_found");
+}
+
+// ── GET /api/runs/{run_id}/events/stream (SSE) ──────────────────────
+
+#[tokio::test]
+async fn sse_stream_endpoint_returns_correct_content_type() {
+    let (router, _pool) = test_app().await;
+    let tool_id = create_github_tool(&router).await;
+    let run_id = create_run(&router, &tool_id).await;
+
+    // Send a raw request to the SSE endpoint and check headers.
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/runs/{run_id}/events/stream"))
+                .body(Body::empty())
+                .expect("SSE request must build"),
+        )
+        .await
+        .expect("SSE request must complete");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .expect("content-type header must be present")
+        .to_str()
+        .expect("content-type must be a string");
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "SSE content-type must be text/event-stream, got: {content_type}"
+    );
+}
+
+#[tokio::test]
+async fn sse_stream_endpoint_rejects_missing_run() {
+    let (router, _pool) = test_app().await;
+    let fake_id = Uuid::new_v4().to_string();
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/api/runs/{fake_id}/events/stream"))
+                .body(Body::empty())
+                .expect("SSE request must build"),
+        )
+        .await
+        .expect("SSE request must complete");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

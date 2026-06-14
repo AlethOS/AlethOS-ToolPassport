@@ -1,3 +1,4 @@
+aiosqlite==0.22.1
 annotated-types==0.7.0
 anyio==4.13.0
 attrs==26.1.0
@@ -16,6 +17,7 @@ langchain-core==1.4.6
 langchain-protocol==0.0.16
 langgraph==1.2.4
 langgraph-checkpoint==4.1.1
+langgraph-checkpoint-sqlite==2.0.10
 langgraph-prebuilt==1.1.0
 langgraph-sdk==0.4.2
 langsmith==0.8.15
@@ -37,6 +39,7 @@ requests==2.34.2
 requests-toolbelt==1.0.0
 rpds-py==2026.5.1
 ruff==0.15.17
+sqlite-vec==0.1.9
 tenacity==9.1.4
 typing-inspection==0.4.2
 typing_extensions==4.15.0

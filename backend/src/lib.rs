@@ -10,6 +10,6 @@ pub use domain::{
 };
 pub use repository::{canonical_sha256, connect_and_migrate, migrate, sha256_hex};
 pub use services::{
-    DEFAULT_MAX_STORED_BYTES, ScoringError, StorageService, audit_binding_check_ids,
-    current_audit_binding, score_check_results,
+    DEFAULT_MAX_STORED_BYTES, EventBroadcaster, ScoringError, StorageService,
+    audit_binding_check_ids, current_audit_binding, score_check_results,
 };

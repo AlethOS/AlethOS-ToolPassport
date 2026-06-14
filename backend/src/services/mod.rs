@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 use chrono::Utc;
 use serde_json::{Map, Value, json};
 use thiserror::Error;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::{
@@ -67,17 +69,70 @@ pub enum ServiceError {
 }
 
 #[derive(Clone)]
+pub struct EventBroadcaster {
+    channels: Arc<RwLock<HashMap<Uuid, broadcast::Sender<String>>>>,
+}
+
+impl EventBroadcaster {
+    pub fn new() -> Self {
+        Self {
+            channels: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Subscribe to events for a run. If no channel exists yet, one is created
+    /// lazily with capacity for 256 events.
+    pub fn subscribe(&self, run_id: Uuid) -> broadcast::Receiver<String> {
+        let channels = self.channels.read().unwrap();
+        if let Some(sender) = channels.get(&run_id) {
+            return sender.subscribe();
+        }
+        drop(channels);
+        let mut channels = self.channels.write().unwrap();
+        let sender = channels
+            .entry(run_id)
+            .or_insert_with(|| broadcast::channel(256).0);
+        sender.subscribe()
+    }
+
+    /// Push a serialized event JSON string to all subscribers of a run.
+    /// If no subscribers exist, the event is silently dropped.
+    pub fn broadcast(&self, run_id: Uuid, event_json: String) {
+        let channels = self.channels.read().unwrap();
+        if let Some(sender) = channels.get(&run_id) {
+            let _ = sender.send(event_json);
+        }
+    }
+}
+
+impl Default for EventBroadcaster {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone)]
 pub struct TrustCoreService {
     repository: Repository,
     storage: StorageService,
+    broadcaster: EventBroadcaster,
 }
 
 impl TrustCoreService {
-    pub fn new(repository: Repository, storage: StorageService) -> Self {
+    pub fn new(
+        repository: Repository,
+        storage: StorageService,
+        broadcaster: EventBroadcaster,
+    ) -> Self {
         Self {
             repository,
             storage,
+            broadcaster,
         }
+    }
+
+    pub fn broadcaster(&self) -> &EventBroadcaster {
+        &self.broadcaster
     }
 
     pub async fn create_run(&self, request: CreateRunRequest) -> Result<Run, ServiceError> {
@@ -134,6 +189,27 @@ impl TrustCoreService {
         self.repository.list_runs().await.map_err(Into::into)
     }
 
+    pub async fn list_events_for_run(&self, run_id: &str) -> Result<Vec<RunEvent>, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        ensure_run_exists(&self.repository, run_id).await?;
+        self.repository
+            .list_events(run_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn get_latest_check_results(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<CheckResults>, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        ensure_run_exists(&self.repository, run_id).await?;
+        self.repository
+            .get_latest_check_results(run_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn get_run_details(&self, run_id: &str) -> Result<RunDetails, ServiceError> {
         let run_id = parse_run_id(run_id)?;
         let run = self
@@ -173,7 +249,8 @@ impl TrustCoreService {
             prev_event_hash: String::new(), // computed by repository
         };
 
-        self.repository
+        let event = self
+            .repository
             .append_event(
                 &event,
                 run.status,
@@ -186,7 +263,11 @@ impl TrustCoreService {
                     "run state changed while appending the event; reload and retry".to_owned(),
                 ),
                 other => ServiceError::Repository(other),
-            })
+            })?;
+
+        let sse_json = event_to_sse_json(&event);
+        self.broadcaster.broadcast(run_id, sse_json);
+        Ok(event)
     }
 
     // ── Tool Registry ─────────────────────────────────────────────
@@ -463,7 +544,11 @@ impl TrustCoreService {
         );
 
         match self.repository.create_artifact(&artifact, &event).await {
-            Ok(artifact) => Ok(artifact),
+            Ok(artifact) => {
+                let sse_json = event_to_sse_json(&event);
+                self.broadcaster.broadcast(run_id, sse_json);
+                Ok(artifact)
+            }
             Err(error) => {
                 let _ = self.storage.remove_file(&artifact.storage_key).await;
                 Err(error.into())
@@ -543,7 +628,11 @@ impl TrustCoreService {
         );
 
         match self.repository.create_evidence(&evidence, &event).await {
-            Ok(evidence) => Ok(evidence),
+            Ok(evidence) => {
+                let sse_json = event_to_sse_json(&event);
+                self.broadcaster.broadcast(run_id, sse_json);
+                Ok(evidence)
+            }
             Err(error) => {
                 let _ = self.storage.remove_file(&evidence.storage_key).await;
                 Err(error.into())
@@ -617,6 +706,10 @@ impl TrustCoreService {
             .map_err(|error| match error {
                 RepositoryError::UniqueViolation => ServiceError::CheckResultsAlreadyExist,
                 other => ServiceError::Repository(other),
+            })
+            .inspect(|_| {
+                let sse_json = event_to_sse_json(&event);
+                self.broadcaster.broadcast(run_id, sse_json);
             })
     }
 
@@ -777,6 +870,10 @@ impl TrustCoreService {
                 RepositoryError::UniqueViolation => ServiceError::EvidenceBoardAlreadyFrozen,
                 other => ServiceError::Repository(other),
             })
+            .inspect(|_| {
+                let sse_json = event_to_sse_json(&event);
+                self.broadcaster.broadcast(run_id, sse_json);
+            })
     }
 
     pub async fn get_evidence_freeze(
@@ -927,6 +1024,10 @@ impl TrustCoreService {
             .map_err(|error| match error {
                 RepositoryError::UniqueViolation => ServiceError::PassportAlreadyFrozen,
                 other => ServiceError::Repository(other),
+            })
+            .inspect(|_| {
+                let sse_json = event_to_sse_json(&event);
+                self.broadcaster.broadcast(run_id, sse_json);
             })
     }
 
@@ -1080,6 +1181,14 @@ fn generated_event(run_id: Uuid, event_type: RunEventType, payload: Value) -> Ru
         event_hash: String::new(),      // computed by repository
         prev_event_hash: String::new(), // computed by repository
     }
+}
+
+/// Serialize a RunEvent to a JSON string for SSE broadcast.
+/// For generated events whose hashes haven't been computed yet, the
+/// serialization uses the fields available; the subscriber will pick up
+/// accurate hashes on the next full event list fetch.
+fn event_to_sse_json(event: &RunEvent) -> String {
+    serde_json::to_string(event).unwrap_or_default()
 }
 
 fn validate_freeze_header(request: &FreezeEvidenceBoardRequest) -> Result<(), ServiceError> {

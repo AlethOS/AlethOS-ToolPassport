@@ -3,14 +3,20 @@
 Each node accepts the full GraphState and returns a dict of fields to update.
 Most nodes use mock/fixture data; ``hypothesis_builder_llm`` optionally calls
 GLM via the LLM adapter for richer gap descriptions.
+
+When a ``BackendClient`` is configured (via ``backend_client.set_backend_client``),
+nodes that create evidence, artifacts, or events will persist them to the Rust
+Trust Core. On failure they fall back to mock data.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, cast
 
+from .backend_client import get_backend_client
 from .fixtures import (
     load_profile,
     load_standard,
@@ -18,7 +24,7 @@ from .fixtures import (
     make_mock_gaps,
 )
 from .llm import LLMConfig, LLMError, chat_structured_list
-from .state import CheckFinding, GapEntry, GraphState, ResearchBudget
+from .state import CheckFinding, EvidenceEntry, GapEntry, GraphState, ResearchBudget
 
 logger = logging.getLogger(__name__)
 
@@ -201,17 +207,65 @@ def hypothesis_builder_llm(state: GraphState) -> dict[str, Any]:
 
 
 def investigation_round(state: GraphState) -> dict[str, Any]:
-    """Run one investigation round: collect mock evidence, close some gaps."""
+    """Run one investigation round: collect evidence, close some gaps.
+
+    When a BackendClient is configured, each evidence item is persisted to
+    the Rust Trust Core API and the returned UUID replaces the mock ID.
+    On failure the node falls back to mock evidence transparently.
+    """
     round_num = state.research_round
     checks = _profile_checks(state)
     all_check_ids = [c["check_id"] for c in checks]
 
-    # Generate 2 new evidence entries this round
-    new_evidence = make_mock_evidence(all_check_ids, round_num)
+    # Generate mock evidence as the base (backend may replace IDs)
+    mock_evidence = make_mock_evidence(all_check_ids, round_num)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    backend = get_backend_client()
+    persisted_evidence: list[EvidenceEntry] = []
+
+    for ev in mock_evidence:
+        if backend is None:
+            persisted_evidence.append(ev)
+            continue
+
+        artifact_id: str | None = None
+        # If the mock evidence has an excerpt, upload it as an artifact first.
+        snippet = ev.excerpt.encode("utf-8")
+        artifact_result = backend.upload_artifact(
+            state.run_id,
+            f"{ev.evidence_id}.txt",
+            snippet,
+            "text/plain; charset=utf-8",
+        )
+        if artifact_result is not None:
+            artifact_id = artifact_result.get("artifact_id")
+
+        evidence_payload: dict[str, Any] = {
+            "evidence_schema_version": "0.2.0",
+            "source_type": ev.source_type,
+            "source_url": f"https://example.com/mock/{ev.evidence_id}",
+            "source_revision": None,
+            "title": ev.title,
+            "excerpt": ev.excerpt,
+            "retrieved_at": now_iso,
+            "snapshot_artifact_id": artifact_id,
+            "supports": ev.supports,
+            "contradicts": ev.contradicts,
+            "metadata": {},
+        }
+
+        result = backend.create_evidence(state.run_id, evidence_payload)
+        if result is not None:
+            # Replace mock entry with backend-verified entry (real UUIDs).
+            persisted_evidence.append(EvidenceEntry.from_backend(result))
+        else:
+            logger.debug("Evidence persistence failed for %s, using mock", ev.evidence_id)
+            persisted_evidence.append(ev)
 
     # Determine which gaps are now resolved (those supported by new evidence)
     newly_supported: set[str] = set()
-    for ev in new_evidence:
+    for ev in persisted_evidence:
         newly_supported.update(ev.supports)
 
     updated_gaps = [
@@ -228,14 +282,14 @@ def investigation_round(state: GraphState) -> dict[str, Any]:
     budget = ResearchBudget(
         max_rounds=state.research_budget.max_rounds,
         max_sources=state.research_budget.max_sources,
-        sources_used=state.research_budget.sources_used + len(new_evidence),
+        sources_used=state.research_budget.sources_used + len(persisted_evidence),
     )
 
     return {
         "current_node": "investigation_round",
         "research_round": round_num + 1,
         "research_budget": budget,
-        "evidence_board": list(state.evidence_board) + new_evidence,
+        "evidence_board": list(state.evidence_board) + persisted_evidence,
         "open_gaps": updated_gaps,
     }
 
@@ -268,11 +322,71 @@ def gap_analysis(state: GraphState) -> dict[str, Any]:
 
 
 def freeze_evidence_board(state: GraphState) -> dict[str, Any]:
-    """Freeze the evidence board and transition to evaluation phase."""
-    return {
+    """Freeze the evidence board and transition to evaluation phase.
+
+    When a BackendClient is configured, submits the freeze proposal to the
+    Rust Trust Core and records the returned board version.
+    """
+    updates: dict[str, Any] = {
         "current_node": "freeze_evidence_board",
         "phase": "evaluation",
     }
+
+    backend = get_backend_client()
+    if backend is None:
+        return updates
+
+    checks = _profile_checks(state)
+    valid_check_ids = {c["check_id"] for c in checks}
+
+    # Build gaps from open_gaps state
+    gap_entries: list[dict[str, Any]] = []
+    for g in state.open_gaps:
+        if g.check_id not in valid_check_ids:
+            continue
+        status = "resolved" if g.resolved else "open"
+        gap_entries.append({
+            "gap_id": g.gap_id,
+            "check_id": g.check_id,
+            "description": g.description,
+            "priority": g.priority,
+            "status": status,
+            "resolution": None,
+        })
+
+    # Build claims from evidence board
+    claim_entries: list[dict[str, Any]] = []
+    for idx, ev in enumerate(state.evidence_board):
+        if len(ev.supports) > 0:
+            claim_entries.append({
+                "claim_id": f"claim-e{idx}",
+                "check_id": ev.supports[0],
+                "statement": f"Evidence from {ev.title}",
+                "confidence": 0.7,
+                "supports": ev.supports,
+                "contradicts": ev.contradicts,
+            })
+
+    evidence_ids = [ev.evidence_id for ev in state.evidence_board]
+
+    request: dict[str, Any] = {
+        "evidence_board_schema_version": "0.1.0",
+        "version": 1,
+        "evidence_ids": evidence_ids,
+        "claims": claim_entries,
+        "gaps": gap_entries,
+        "freeze_reason": state.stop_reason or "investigation complete",
+    }
+
+    result = backend.freeze_evidence_board(state.run_id, request)
+    if result is not None:
+        board = result.get("evidence_board", {})
+        updates["frozen_board"] = {
+            "version": board.get("version", 1),
+            "frozen_at": board.get("frozen_at", ""),
+        }
+
+    return updates
 
 
 def check_execution(state: GraphState) -> dict[str, Any]:
@@ -309,10 +423,43 @@ def check_execution(state: GraphState) -> dict[str, Any]:
             )
         )
 
-    return {
+    # Optionally submit to backend.
+    updates: dict[str, Any] = {
         "current_node": "check_execution",
         "check_findings": findings,
     }
+
+    backend = get_backend_client()
+    if backend is None or state.frozen_board is None:
+        return updates
+
+    finding_submissions: list[dict[str, Any]] = []
+    for f in findings:
+        submission: dict[str, Any] = {
+            "check_id": f.check_id,
+            "finding": f.finding,
+            "rationale": f.rationale,
+            "evidence_ids": f.evidence_ids,
+            "not_applicable_reason": None,
+        }
+        finding_submissions.append(submission)
+
+    check_submission: dict[str, Any] = {
+        "check_results_schema_version": "0.1.0",
+        "evidence_board_version": state.frozen_board.version,
+        "findings": finding_submissions,
+    }
+
+    result = backend.submit_check_results(state.run_id, check_submission)
+    if result is not None:
+        updates["check_results_ref"] = {
+            "check_results_id": result.get("check_results_id", ""),
+            "evidence_board_version": result.get("evidence_board_version", 1),
+            "total_score": result.get("total_score", 0),
+            "rating": result.get("rating", ""),
+        }
+
+    return updates
 
 
 # ---------------------------------------------------------------------------
@@ -400,8 +547,46 @@ def passport_draft(state: GraphState) -> dict[str, Any]:
         "evidence_board": evidence_data,
         "_note": "mock draft — not scored by Rust; deterministic scoring is Stage 6",
     }
-    return {
+    updates: dict[str, Any] = {
         "current_node": "passport_draft",
         "phase": "done",
         "passport_draft": draft,
     }
+
+    backend = get_backend_client()
+    if backend is None or state.frozen_board is None:
+        return updates
+
+    # Build a minimal FreezePassportRequest from the draft data.
+    passport_request: dict[str, Any] = {
+        "passport_version": "0.2.0",
+        "evidence_board_version": state.frozen_board.version,
+        "target_revision": state.target_revision,
+        "audit_scope": state.goal,
+        "capability_claims": [
+            {
+                "statement_id": f"cap-{f.check_id}",
+                "statement": f.rationale,
+                "evidence_ids": f.evidence_ids,
+            }
+            for f in state.check_findings
+            if f.finding in ("pass", "partial")
+        ],
+        "interfaces": [],
+        "risks": [],
+        "known_gaps": [
+            g.description for g in state.open_gaps if not g.resolved
+        ],
+        "recommendation": {
+            "summary": f"Audit completed with stop reason: {state.stop_reason}. "
+            f"Evidence collected: {len(state.evidence_board)} items.",
+            "conditions": [],
+        },
+    }
+
+    result = backend.freeze_passport(state.run_id, passport_request)
+    if result is not None:
+        prov = result.get("provenance", {})
+        updates["passport_sequence"] = prov.get("passport_sequence")
+
+    return updates

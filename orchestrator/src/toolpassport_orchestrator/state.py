@@ -14,12 +14,34 @@ class ResearchBudget(BaseModel):
 
 
 class EvidenceEntry(BaseModel):
+    evidence_schema_version: str = "0.2.0"
     evidence_id: str
     source_type: str
+    source_url: str
+    source_revision: str | None = None
     title: str
     excerpt: str
+    retrieved_at: str = ""
+    snapshot_artifact_id: str | None = None
     supports: list[str] = Field(default_factory=list)
     contradicts: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_backend(cls, data: dict[str, Any]) -> EvidenceEntry:
+        """Build an EvidenceEntry from a backend Evidence response dict."""
+        return cls(
+            evidence_schema_version=data.get("evidence_schema_version", "0.2.0"),
+            evidence_id=data["evidence_id"],
+            source_type=data["source_type"],
+            source_url=data.get("source_url", ""),
+            source_revision=data.get("source_revision"),
+            title=data["title"],
+            excerpt=data.get("excerpt", ""),
+            retrieved_at=data.get("retrieved_at", ""),
+            snapshot_artifact_id=data.get("snapshot_artifact_id"),
+            supports=data.get("supports", []),
+            contradicts=data.get("contradicts", []),
+        )
 
 
 class GapEntry(BaseModel):
@@ -35,6 +57,20 @@ class CheckFinding(BaseModel):
     finding: Literal["pass", "partial", "fail", "unknown"]
     rationale: str
     evidence_ids: list[str] = Field(default_factory=list)
+
+
+class FrozenBoardRef(BaseModel):
+    """Reference to a frozen evidence board version in the backend."""
+    version: int
+    frozen_at: str = ""
+
+
+class CheckResultsRef(BaseModel):
+    """Reference to persisted check results in the backend."""
+    check_results_id: str
+    evidence_board_version: int
+    total_score: int = 0
+    rating: str = ""
 
 
 class GraphState(BaseModel):
@@ -67,3 +103,7 @@ class GraphState(BaseModel):
     ] = "not_requested"
     stop_reason: str | None = None
     passport_draft: dict[str, Any] | None = None
+    # Backend freeze references
+    frozen_board: FrozenBoardRef | None = None
+    check_results_ref: CheckResultsRef | None = None
+    passport_sequence: int | None = None
