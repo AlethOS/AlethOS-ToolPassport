@@ -93,6 +93,18 @@ impl From<ServiceError> for ApiError {
                 error.to_string(),
                 json!({}),
             ),
+            ServiceError::EvidenceBoardAlreadyFrozen => Self::new(
+                StatusCode::CONFLICT,
+                "evidence_board_already_frozen",
+                error.to_string(),
+                json!({}),
+            ),
+            ServiceError::EvidenceBoardNotFound => Self::new(
+                StatusCode::NOT_FOUND,
+                "evidence_board_not_found",
+                error.to_string(),
+                json!({}),
+            ),
             ServiceError::ToolNotFound => Self::new(
                 StatusCode::NOT_FOUND,
                 "tool_not_found",

@@ -596,7 +596,6 @@ async fn decision_events_are_accepted() {
         "gap_detected",
         "evidence_linked",
         "claim_contradicted",
-        "evidence_board_frozen",
         "review_issue_found",
         "directives_accepted",
         "human_feedback_received",
@@ -633,6 +632,16 @@ async fn decision_events_are_accepted() {
         .expect("events must be an array");
     // run_created + node_started + externally accepted decision events
     assert_eq!(events.len(), 2 + decision_types.len());
+
+    let forged_freeze = append_event_with_payload(
+        &router,
+        &run_id,
+        "orchestrator",
+        "evidence_board_frozen",
+        json!({"evidence_board_version": 1}),
+    )
+    .await;
+    assert_error(&forged_freeze, StatusCode::BAD_REQUEST, "invalid_request");
 }
 
 #[tokio::test]

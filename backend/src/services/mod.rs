@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use chrono::Utc;
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -7,9 +9,11 @@ use crate::{
     domain::{
         AddIdentifierRequest, AppendRunEventRequest, Artifact, CheckResults,
         CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
-        CreateToolRequest, Evidence, ExternalIdentifier, ReasonCode, ResolutionResponse,
-        ResolutionStatus, ResolveToolRequest, Run, RunDetails, RunEvent, RunEventType, RunStatus,
-        Tool, ToolInput, ZERO_HASH,
+        CreateToolRequest, Evidence, EvidenceFreezeResult, EvidenceManifestEntry,
+        ExternalIdentifier, FreezeEvidenceBoardRequest, FrozenEvidenceBoard,
+        FrozenEvidenceManifest, ReasonCode, ResolutionResponse, ResolutionStatus,
+        ResolveToolRequest, Run, RunDetails, RunEvent, RunEventType, RunStatus, Tool, ToolInput,
+        ZERO_HASH,
     },
     repository::{Repository, RepositoryError},
 };
@@ -18,7 +22,9 @@ mod normalizer;
 mod scoring;
 mod storage;
 
-pub use scoring::{ScoringError, current_audit_binding, score_check_results};
+pub use scoring::{
+    ScoringError, audit_binding_check_ids, current_audit_binding, score_check_results,
+};
 pub use storage::{DEFAULT_MAX_STORED_BYTES, StorageError, StorageService};
 
 #[derive(Debug, Error)]
@@ -33,6 +39,10 @@ pub enum ServiceError {
     Conflict(String),
     #[error("check results already exist for this evidence_board_version")]
     CheckResultsAlreadyExist,
+    #[error("evidence board version is already frozen")]
+    EvidenceBoardAlreadyFrozen,
+    #[error("evidence board version is not frozen")]
+    EvidenceBoardNotFound,
     #[error("tool not found")]
     ToolNotFound,
     #[error("invalid tool ID format")]
@@ -558,10 +568,17 @@ impl TrustCoreService {
             .ok_or(ServiceError::RunNotFound)?;
         let evidence_ids = self
             .repository
-            .list_evidence(run_id)
+            .get_evidence_freeze(run_id, submission.evidence_board_version)
             .await?
+            .ok_or_else(|| {
+                ServiceError::InvalidRequest(format!(
+                    "evidence board version {} is not frozen",
+                    submission.evidence_board_version
+                ))
+            })?
+            .evidence_board
+            .evidence_ids
             .into_iter()
-            .map(|evidence| evidence.evidence_id)
             .collect();
 
         // Approval-required N/A remains closed until Rust has a dedicated
@@ -597,6 +614,179 @@ impl TrustCoreService {
                 other => ServiceError::Repository(other),
             })
     }
+
+    pub async fn freeze_evidence_board(
+        &self,
+        run_id: &str,
+        mut request: FreezeEvidenceBoardRequest,
+    ) -> Result<EvidenceFreezeResult, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        let run = self
+            .repository
+            .get_run(run_id)
+            .await?
+            .ok_or(ServiceError::RunNotFound)?;
+        validate_freeze_header(&request)?;
+
+        let valid_check_ids = audit_binding_check_ids(&run.audit_binding)
+            .map_err(|error| ServiceError::InvalidRequest(error.to_string()))?;
+        let evidence_by_id: HashMap<_, _> = self
+            .repository
+            .list_evidence(run_id)
+            .await?
+            .into_iter()
+            .map(|evidence| (evidence.evidence_id, evidence))
+            .collect();
+        let artifact_by_id: HashMap<_, _> = self
+            .repository
+            .list_artifacts(run_id)
+            .await?
+            .into_iter()
+            .map(|artifact| (artifact.artifact_id, artifact))
+            .collect();
+
+        ensure_unique_uuids("evidence_ids", &request.evidence_ids)?;
+        request.evidence_ids.sort_unstable_by_key(Uuid::to_string);
+        let board_evidence_ids: HashSet<_> = request.evidence_ids.iter().copied().collect();
+        for evidence_id in &request.evidence_ids {
+            if !evidence_by_id.contains_key(evidence_id) {
+                return Err(ServiceError::InvalidRequest(format!(
+                    "evidence ID {evidence_id} does not belong to the run"
+                )));
+            }
+        }
+
+        let mut claim_ids = HashSet::new();
+        for claim in &mut request.claims {
+            validate_stable_id("claim_id", &claim.claim_id)?;
+            if !claim_ids.insert(claim.claim_id.clone()) {
+                return Err(ServiceError::InvalidRequest(format!(
+                    "claim ID {} is duplicated",
+                    claim.claim_id
+                )));
+            }
+            validate_check_id(&valid_check_ids, &claim.check_id)?;
+            validate_non_empty("claim statement", &claim.statement)?;
+            if !claim.confidence.is_finite() || !(0.0..=1.0).contains(&claim.confidence) {
+                return Err(ServiceError::InvalidRequest(format!(
+                    "claim {} confidence must be between 0 and 1",
+                    claim.claim_id
+                )));
+            }
+            normalize_evidence_references(
+                &claim.claim_id,
+                "supports",
+                &mut claim.supports,
+                &board_evidence_ids,
+            )?;
+            normalize_evidence_references(
+                &claim.claim_id,
+                "contradicts",
+                &mut claim.contradicts,
+                &board_evidence_ids,
+            )?;
+            claim.statement = claim.statement.trim().to_owned();
+        }
+        request.claims.sort_by(|a, b| a.claim_id.cmp(&b.claim_id));
+
+        let mut gap_ids = HashSet::new();
+        for gap in &mut request.gaps {
+            validate_stable_id("gap_id", &gap.gap_id)?;
+            if !gap_ids.insert(gap.gap_id.clone()) {
+                return Err(ServiceError::InvalidRequest(format!(
+                    "gap ID {} is duplicated",
+                    gap.gap_id
+                )));
+            }
+            validate_check_id(&valid_check_ids, &gap.check_id)?;
+            validate_non_empty("gap description", &gap.description)?;
+            gap.description = gap.description.trim().to_owned();
+            if let Some(resolution) = &mut gap.resolution {
+                validate_non_empty("gap resolution", resolution)?;
+                *resolution = resolution.trim().to_owned();
+            }
+        }
+        request.gaps.sort_by(|a, b| a.gap_id.cmp(&b.gap_id));
+
+        let frozen_at = Utc::now();
+        let mut entries = Vec::with_capacity(request.evidence_ids.len());
+        for evidence_id in &request.evidence_ids {
+            let evidence = &evidence_by_id[evidence_id];
+            let snapshot_hash = evidence
+                .snapshot_artifact_id
+                .map(|artifact_id| {
+                    artifact_by_id
+                        .get(&artifact_id)
+                        .map(|artifact| artifact.sha256_hash.clone())
+                        .ok_or_else(|| {
+                            RepositoryError::InvalidStoredData(format!(
+                                "evidence {evidence_id} references missing snapshot artifact {artifact_id}"
+                            ))
+                        })
+                })
+                .transpose()?;
+            entries.push(EvidenceManifestEntry {
+                evidence_id: *evidence_id,
+                content_hash: evidence.content_hash.clone(),
+                snapshot_artifact_id: evidence.snapshot_artifact_id,
+                snapshot_hash,
+            });
+        }
+        let freeze = EvidenceFreezeResult {
+            evidence_board: FrozenEvidenceBoard {
+                evidence_board_schema_version: "0.1.0".to_owned(),
+                run_id,
+                version: request.version,
+                standard_id: run.audit_binding.standard_id,
+                standard_version: run.audit_binding.standard_version,
+                profile_id: run.audit_binding.profile_id,
+                profile_version: run.audit_binding.profile_version,
+                evidence_ids: request.evidence_ids,
+                claims: request.claims,
+                gaps: request.gaps,
+                freeze_reason: request.freeze_reason.trim().to_owned(),
+                frozen_at,
+            },
+            evidence_manifest: FrozenEvidenceManifest {
+                evidence_manifest_schema_version: "0.1.0".to_owned(),
+                run_id,
+                evidence_board_version: request.version,
+                entries,
+            },
+        };
+        let event = generated_event(
+            run_id,
+            RunEventType::EvidenceBoardFrozen,
+            json!({
+                "claim_count": freeze.evidence_board.claims.len(),
+                "evidence_board_version": freeze.evidence_board.version,
+                "evidence_count": freeze.evidence_board.evidence_ids.len(),
+                "gap_count": freeze.evidence_board.gaps.len(),
+            }),
+        );
+
+        self.repository
+            .create_evidence_freeze(&freeze, &event)
+            .await
+            .map_err(|error| match error {
+                RepositoryError::UniqueViolation => ServiceError::EvidenceBoardAlreadyFrozen,
+                other => ServiceError::Repository(other),
+            })
+    }
+
+    pub async fn get_evidence_freeze(
+        &self,
+        run_id: &str,
+        version: u64,
+    ) -> Result<EvidenceFreezeResult, ServiceError> {
+        let run_id = parse_run_id(run_id)?;
+        validate_evidence_board_version(version)?;
+        ensure_run_exists(&self.repository, run_id).await?;
+        self.repository
+            .get_evidence_freeze(run_id, version)
+            .await?
+            .ok_or(ServiceError::EvidenceBoardNotFound)
+    }
 }
 
 struct EventProjection {
@@ -611,12 +801,12 @@ fn event_projection(
     let current_node = || Some(request.node_id.trim().to_owned());
 
     match request.event_type {
-        RunEventType::RunCreated | RunEventType::ScoreChanged => {
-            Err(ServiceError::InvalidRequest(format!(
-                "{} is generated by the Rust trust core",
-                request.event_type.as_str()
-            )))
-        }
+        RunEventType::RunCreated
+        | RunEventType::EvidenceBoardFrozen
+        | RunEventType::ScoreChanged => Err(ServiceError::InvalidRequest(format!(
+            "{} is generated by the Rust trust core",
+            request.event_type.as_str()
+        ))),
         RunEventType::NodeStarted => {
             ensure_status(run.status, &[RunStatus::Pending, RunStatus::Running])?;
             Ok(EventProjection {
@@ -733,6 +923,100 @@ fn generated_event(run_id: Uuid, event_type: RunEventType, payload: Value) -> Ru
         event_hash: String::new(),      // computed by repository
         prev_event_hash: String::new(), // computed by repository
     }
+}
+
+fn validate_freeze_header(request: &FreezeEvidenceBoardRequest) -> Result<(), ServiceError> {
+    if request.evidence_board_schema_version != "0.1.0" {
+        return Err(ServiceError::InvalidRequest(
+            "evidence_board_schema_version must be 0.1.0".to_owned(),
+        ));
+    }
+    validate_evidence_board_version(request.version)?;
+    validate_non_empty("freeze_reason", &request.freeze_reason)
+}
+
+fn validate_evidence_board_version(version: u64) -> Result<(), ServiceError> {
+    if version == 0 || version > i64::MAX as u64 {
+        Err(ServiceError::InvalidRequest(
+            "evidence board version must be between 1 and 9223372036854775807".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_non_empty(field: &str, value: &str) -> Result<(), ServiceError> {
+    if value.trim().is_empty() {
+        Err(ServiceError::InvalidRequest(format!(
+            "{field} must not be empty"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_stable_id(field: &str, value: &str) -> Result<(), ServiceError> {
+    let mut previous_separator = false;
+    let valid = value.chars().enumerate().all(|(index, character)| {
+        let separator = matches!(character, '.' | '_' | '-');
+        let allowed = character.is_ascii_lowercase() || character.is_ascii_digit() || separator;
+        let position_valid = index != 0 || character.is_ascii_lowercase();
+        let separator_valid = !separator || !previous_separator;
+        previous_separator = separator;
+        allowed && position_valid && separator_valid
+    }) && !value.is_empty()
+        && !previous_separator;
+
+    if valid {
+        Ok(())
+    } else {
+        Err(ServiceError::InvalidRequest(format!(
+            "{field} must be a stable lowercase ID"
+        )))
+    }
+}
+
+fn validate_check_id(
+    valid_check_ids: &HashSet<String>,
+    check_id: &str,
+) -> Result<(), ServiceError> {
+    if valid_check_ids.contains(check_id) {
+        Ok(())
+    } else {
+        Err(ServiceError::InvalidRequest(format!(
+            "unknown profile check {check_id}"
+        )))
+    }
+}
+
+fn ensure_unique_uuids(field: &str, values: &[Uuid]) -> Result<(), ServiceError> {
+    let mut unique = HashSet::new();
+    for value in values {
+        if !unique.insert(value) {
+            return Err(ServiceError::InvalidRequest(format!(
+                "{field} contains duplicated evidence ID {value}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_evidence_references(
+    claim_id: &str,
+    field: &str,
+    values: &mut [Uuid],
+    board_evidence_ids: &HashSet<Uuid>,
+) -> Result<(), ServiceError> {
+    ensure_unique_uuids(&format!("claim {claim_id} {field}"), values)?;
+    for evidence_id in values.iter() {
+        if !board_evidence_ids.contains(evidence_id) {
+            return Err(ServiceError::InvalidRequest(format!(
+                "claim {claim_id} {field} references evidence ID {evidence_id} outside the board"
+            )));
+        }
+    }
+    values.sort_unstable_by_key(Uuid::to_string);
+    Ok(())
 }
 
 fn validate_artifact_request(

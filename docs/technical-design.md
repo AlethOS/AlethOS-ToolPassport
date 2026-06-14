@@ -18,8 +18,8 @@ Evidence v0.2 create/stored schema，以及 Stage 6 的 Check Result submission/
 冻结 Evidence Board、Evidence Manifest、Passport v0.2、Provenance 和独立
 Attestation Receipt 契约。Tool Registry 持久化/API、Run binding、Stage 3 离线调查
 mock、Stage 4 Evidence/Artifact Trust Core 与 Stage 5 决策事件/哈希链已实现；
-Stage 6 已完成共享契约、Rust 确定性评分核心、Run catalog 绑定与 check-result
-持久化/API，冻结持久化仍属于目标设计。
+Stage 6 已完成共享契约、Rust 确定性评分核心、Run catalog 绑定、check-result
+持久化/API，以及冻结 Evidence Board/Manifest 持久化/API。
 在后端、orchestrator 和 Dashboard 完成协调迁移前，不得向现有 API 发送这些尚未
 实现的 Stage 6 字段。
 
@@ -266,7 +266,7 @@ Stage 6 已发布严格的 `check-results-submission.schema.json` 与
 `check-results.schema.json`。前者只允许推理层提交 finding、理由、Evidence ID 和
 `not_applicable` 理由，不允许提交 Run ID、维度聚合、总分、rating 或 Hash；后者定义
 Rust 解析 Profile/Standard 后补全的 dimension、weight、high-risk 标记、scoring
-rule、rule points、weighted points 和确定性聚合。API 与持久化实现仍待后续切片。
+rule、rule points、weighted points 和确定性聚合。
 Rust 输出 stored check results 时必须使用绑定 Profile 中的 check 顺序，拒绝重复、
 缺失或额外 check；冻结 Evidence Manifest 必须按 `evidence_id` 升序排列后再执行
 JCS 和 SHA-256，避免调用方数组顺序改变 commitment。
@@ -274,14 +274,15 @@ JCS 和 SHA-256，避免调用方数组顺序改变 commitment。
 当前 Rust 评分核心已实现上述 check 顺序、finding 完整性、Evidence ID 所属集合、
 可信 `not_applicable` 批准集合、rule points、weighted points、七维聚合、total score
 和高风险 rating 上限。新 Run 由 Rust 冻结 Standard/Profile `0.3.0` 绑定；
-`POST /api/runs/:run_id/check-results` 从数据库加载该 Run 的 Evidence ID，并在同一
-事务中保存不可修改的 Check Results 与 Rust-owned `score_changed` 事件。通用 Event
-API 不允许伪造 `score_changed`。由于可信人工审批持久化尚未实现，API 当前不批准
+`POST /api/runs/:run_id/evidence-board/freeze` 只接受不可信 Board 提案；Rust 从
+Run binding 和已保存 Evidence/Artifact 补全权威字段，规范化 set-like 数组，生成按
+`evidence_id` 排序的 Manifest，并在同一事务中保存不可修改的 Board、Manifest 与
+Rust-owned `evidence_board_frozen` 事件。`POST /api/runs/:run_id/check-results`
+要求引用已冻结 Board，并且 finding 只能引用该 Board 中的 Evidence；结果与
+Rust-owned `score_changed` 事件在同一事务中保存。通用 Event API 不允许伪造这两类
+Trust Core 事件。由于可信人工审批持久化尚未实现，API 当前不批准
 任何规则要求人工批准的 `not_applicable`；无副作用评分核心仍保留显式可信批准集合
-输入，供后续人工审批 API 接入。冻结 Evidence Board 持久化尚未实现，因此当前 API
-能验证 Evidence 属于同一 Run，但尚不能证明提交的 `evidence_board_version` 已对应
-一个冻结 Board；下一切片必须先实现冻结 Board/Manifest，并把评分 API 收紧为只接受
-已冻结版本。Passport 冻结仍待后续切片。
+输入，供后续人工审批 API 接入。Passport Hash 与冻结仍待后续切片。
 
 ## 5. 长程 Agent 状态机
 
@@ -761,7 +762,7 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 | Orchestrator | Stage 3 离线 Pydantic 调查 mock 已实现 | Partial；已有 Profile、Board、Gap、停止条件和 Skeptic Review mock，尚未接后端、真实来源、恢复或人工等待 |
 | Evidence / Artifact | Stage 4 已实现严格 schema、SQLx 迁移、StorageService、API 和创建事件 | Implemented；Rust 分配 ID/路径、限制大小、计算实际字节 Hash，并在 DB 失败时清理文件；Orchestrator 接入、内容读取与前端展示待实现 |
 | Audit Standard / Profile | Stage 1 已完成 core schema、历史 `0.2.0` 和评分绑定 `0.3.0` Standard/四类 Profile，以及多版本离线 catalog 校验 | Compatible target inputs；Stage 3 已有离线 selector mock，生产级 selector 尚未接真实来源与 Run 持久化 |
-| Passport 与评分 | 已发布严格 Passport v0.2 与 Check Result submission/stored 契约，并实现 Rust 确定性评分核心、Run catalog 绑定及不可修改的 check-result API/持久化 | Partial；推理输入与 Rust-owned totals 已分离，可信 N/A 人工批准和冻结仍待实现 |
+| Passport 与评分 | 已发布严格 Passport v0.2、Check Result submission/stored 与冻结 Board/Manifest 契约，并实现 Rust 确定性评分核心、Run catalog 绑定、冻结 Board/Manifest 及不可修改的 check-result API/持久化 | Partial；推理输入与 Rust-owned totals 已分离，可信 N/A 人工批准和 Passport Hash/冻结仍待实现 |
 | `web3_attestation` | 历史 v0.1 保留该字段；v0.2 已移除并发布独立 Receipt schema | Contract resolved；Receipt 持久化与测试网提交仍待 Stage 8 |
 | Audit Log Hash | 已实现按 sequence 序的 JCS+SHA-256 哈希链 | Resolved；`auditLogHash` 定义为 `provenance_frozen` 事件哈希，Stage 6 实现冻结边界 |
 | Dashboard | 已实现只读双语 Trust Control Desk、Run/Event 轮询和隔离 Preview 视图 | Partial；尚无 SSE、真实 Board/Score/Hash/Passport、写操作或 approval UI |
@@ -787,9 +788,9 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 6. **Deterministic checks and Passport v0.2**：已完成 Check Result
    submission/stored、冻结 Board、Evidence Manifest、Passport v0.2、Provenance 和
    独立 Attestation Receipt 共享契约，以及 Rust check 规则、评分聚合与 rating
-   上限、Run catalog 绑定和不可修改的 check-result API/持久化；下一步实现冻结
-   Evidence Board/Manifest，再实现 JCS Hash、`evidenceManifestHash` 和 Passport
-   冻结持久化/API。
+   上限、Run catalog 绑定、不可修改的 check-result API/持久化，以及冻结 Evidence
+   Board/Manifest API/持久化；下一步实现 JCS Hash、`evidenceManifestHash` 和
+   Passport 冻结持久化/API。
 7. **SSE, recovery, and Dashboard**：接入 checkpoint、恢复、Tool Index、实时 Graph、Evidence Board、Gap Tracker 和 Decision Log。
 8. **Human gate and testnet attestation**：实现绑定 Tool、Run 和 Hash 的审批与独立回执；任何真实提交仍需人工批准。
 

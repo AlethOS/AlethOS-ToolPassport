@@ -45,6 +45,9 @@ class Stage6FreezeContractTests(unittest.TestCase):
             ROOT / "schemas" / "check-results-submission.schema.json"
         )
         self.results_schema = load_json(ROOT / "schemas" / "check-results.schema.json")
+        self.board_submission_schema = load_json(
+            ROOT / "schemas" / "evidence-board-freeze-submission.schema.json"
+        )
         self.board_schema = load_json(ROOT / "schemas" / "evidence-board.schema.json")
         self.manifest_schema = load_json(ROOT / "schemas" / "evidence-manifest.schema.json")
         self.passport_v01_schema = load_json(ROOT / "schemas" / "passport.schema.json")
@@ -125,6 +128,19 @@ class Stage6FreezeContractTests(unittest.TestCase):
             ],
             "freeze_reason": "Research budget reached with reviewable gaps.",
             "frozen_at": "2026-06-13T00:00:01Z",
+        }
+        self.board_submission = {
+            key: value
+            for key, value in self.board.items()
+            if key
+            not in {
+                "run_id",
+                "standard_id",
+                "standard_version",
+                "profile_id",
+                "profile_version",
+                "frozen_at",
+            }
         }
         self.manifest = {
             "evidence_manifest_schema_version": "0.1.0",
@@ -221,6 +237,36 @@ class Stage6FreezeContractTests(unittest.TestCase):
             "unexpected property 'source_excerpt'",
             "\n".join(validate_instance(payload, self.manifest_schema, "manifest")),
         )
+
+    def test_board_freeze_submission_excludes_rust_owned_fields(self) -> None:
+        self.assertEqual(
+            validate_instance(
+                self.board_submission,
+                self.board_submission_schema,
+                "board_submission",
+            ),
+            [],
+        )
+        for field in (
+            "run_id",
+            "standard_id",
+            "profile_id",
+            "frozen_at",
+            "evidence_manifest_hash",
+        ):
+            payload = copy.deepcopy(self.board_submission)
+            payload[field] = "caller-controlled"
+            with self.subTest(field=field):
+                self.assertIn(
+                    f"unexpected property '{field}'",
+                    "\n".join(
+                        validate_instance(
+                            payload,
+                            self.board_submission_schema,
+                            "board_submission",
+                        )
+                    ),
+                )
 
     def test_passport_v02_has_no_attestation_or_commitment_fields(self) -> None:
         self.assertEqual(

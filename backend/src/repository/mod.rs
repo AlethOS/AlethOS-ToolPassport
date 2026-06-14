@@ -12,8 +12,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    Artifact, AuditBinding, CheckResults, Evidence, EvidenceSourceType, ExternalIdentifier, Run,
-    RunEvent, RunEventType, RunStatus, Tool, ToolInput, ToolType, ZERO_HASH,
+    Artifact, AuditBinding, CheckResults, Evidence, EvidenceFreezeResult, EvidenceSourceType,
+    ExternalIdentifier, FrozenEvidenceBoard, FrozenEvidenceManifest, Run, RunEvent, RunEventType,
+    RunStatus, Tool, ToolInput, ToolType, ZERO_HASH,
 };
 
 #[derive(Debug, Error)]
@@ -640,6 +641,88 @@ impl Repository {
         insert_generated_event(&mut transaction, event, &payload).await?;
         transaction.commit().await?;
         Ok(check_results.clone())
+    }
+
+    pub async fn create_evidence_freeze(
+        &self,
+        freeze: &EvidenceFreezeResult,
+        event: &RunEvent,
+    ) -> Result<EvidenceFreezeResult, RepositoryError> {
+        let board_json =
+            serde_json::to_string(&freeze.evidence_board).map_err(invalid_stored_data)?;
+        let manifest_json =
+            serde_json::to_string(&freeze.evidence_manifest).map_err(invalid_stored_data)?;
+        let payload = serde_json::to_string(&event.payload).map_err(invalid_stored_data)?;
+        let mut transaction = self.pool.begin().await?;
+        let run_id = freeze.evidence_board.run_id.to_string();
+        let version = freeze.evidence_board.version as i64;
+
+        let board_insert = sqlx::query(
+            r#"
+            INSERT INTO evidence_boards (run_id, version, board_json, frozen_at)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(&run_id)
+        .bind(version)
+        .bind(board_json)
+        .bind(format_timestamp(freeze.evidence_board.frozen_at))
+        .execute(&mut *transaction)
+        .await;
+
+        if let Err(error) = board_insert {
+            if is_unique_violation(&error) {
+                return Err(RepositoryError::UniqueViolation);
+            }
+            return Err(RepositoryError::Database(error));
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO evidence_manifests (run_id, evidence_board_version, manifest_json)
+            VALUES (?, ?, ?)
+            "#,
+        )
+        .bind(&run_id)
+        .bind(version)
+        .bind(manifest_json)
+        .execute(&mut *transaction)
+        .await?;
+
+        insert_generated_event(&mut transaction, event, &payload).await?;
+        transaction.commit().await?;
+        Ok(freeze.clone())
+    }
+
+    pub async fn get_evidence_freeze(
+        &self,
+        run_id: Uuid,
+        version: u64,
+    ) -> Result<Option<EvidenceFreezeResult>, RepositoryError> {
+        let row: Option<(String, String)> = sqlx::query_as(
+            r#"
+            SELECT board_json, manifest_json
+            FROM evidence_boards
+            JOIN evidence_manifests
+              ON evidence_manifests.run_id = evidence_boards.run_id
+             AND evidence_manifests.evidence_board_version = evidence_boards.version
+            WHERE evidence_boards.run_id = ? AND evidence_boards.version = ?
+            "#,
+        )
+        .bind(run_id.to_string())
+        .bind(version as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|(board_json, manifest_json)| {
+            Ok(EvidenceFreezeResult {
+                evidence_board: serde_json::from_str::<FrozenEvidenceBoard>(&board_json)
+                    .map_err(invalid_stored_data)?,
+                evidence_manifest: serde_json::from_str::<FrozenEvidenceManifest>(&manifest_json)
+                    .map_err(invalid_stored_data)?,
+            })
+        })
+        .transpose()
     }
 
     async fn load_full_tool(&self, row: ToolRow) -> Result<Tool, RepositoryError> {

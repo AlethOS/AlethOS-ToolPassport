@@ -274,6 +274,17 @@ pub fn current_audit_binding(tool_type: ToolType) -> AuditBinding {
     }
 }
 
+pub fn audit_binding_check_ids(
+    audit_binding: &AuditBinding,
+) -> Result<HashSet<String>, ScoringError> {
+    let (_, profile) = load_catalog(audit_binding)?;
+    Ok(profile
+        .checks
+        .into_iter()
+        .map(|check| check.check_id)
+        .collect())
+}
+
 fn validate_submission_header(submission: &CheckResultsSubmission) -> Result<(), ScoringError> {
     if submission.check_results_schema_version != "0.1.0" {
         return Err(ScoringError::InvalidSchemaVersion);

@@ -158,6 +158,41 @@ async fn api_scores_persists_and_events_results_atomically() {
 }
 
 #[tokio::test]
+async fn api_requires_frozen_board_before_scoring() {
+    let app = test_app().await;
+    let run_id = create_run(&app.router).await;
+    let submission = all_findings("pass", None);
+
+    let before_freeze = send_json(
+        &app.router,
+        Method::POST,
+        &format!("/api/runs/{run_id}/check-results"),
+        submission.clone(),
+    )
+    .await;
+    assert_error(&before_freeze, StatusCode::BAD_REQUEST, "invalid_request");
+    assert!(
+        before_freeze.1["message"]
+            .as_str()
+            .unwrap()
+            .contains("is not frozen")
+    );
+
+    assert_eq!(
+        freeze_board(&app.router, &run_id, Vec::new()).await.0,
+        StatusCode::CREATED
+    );
+    let after_freeze = send_json(
+        &app.router,
+        Method::POST,
+        &format!("/api/runs/{run_id}/check-results"),
+        submission,
+    )
+    .await;
+    assert_eq!(after_freeze.0, StatusCode::CREATED);
+}
+
+#[tokio::test]
 async fn duplicate_board_version_is_rejected_without_second_event() {
     let app = test_app().await;
     let run_id = create_run(&app.router).await;
@@ -404,11 +439,43 @@ fn all_findings(finding: &str, evidence_id: Option<&str>) -> Value {
 }
 
 async fn post_results(router: &Router, run_id: &str, payload: Value) -> (StatusCode, Value) {
+    let mut evidence_ids: Vec<Value> = payload["findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|finding| finding["evidence_ids"].as_array().into_iter().flatten())
+        .cloned()
+        .collect();
+    evidence_ids.sort_by_key(Value::to_string);
+    evidence_ids.dedup();
+    let _ = freeze_board(router, run_id, evidence_ids).await;
+
     send_json(
         router,
         Method::POST,
         &format!("/api/runs/{run_id}/check-results"),
         payload,
+    )
+    .await
+}
+
+async fn freeze_board(
+    router: &Router,
+    run_id: &str,
+    evidence_ids: Vec<Value>,
+) -> (StatusCode, Value) {
+    send_json(
+        router,
+        Method::POST,
+        &format!("/api/runs/{run_id}/evidence-board/freeze"),
+        json!({
+            "evidence_board_schema_version": "0.1.0",
+            "version": 1,
+            "evidence_ids": evidence_ids,
+            "claims": [],
+            "gaps": [],
+            "freeze_reason": "Freeze scoring test evidence."
+        }),
     )
     .await
 }

@@ -121,14 +121,14 @@ Receipt. The Rust scoring core loads the versioned `0.3.0` Standard/Profile
 catalog, rejects incomplete or unversioned findings and cross-Run Evidence
 references, and deterministically computes rule points, dimension scores,
 total score, and high-risk-capped rating. New Runs freeze their `0.3.0` audit
-catalog binding. The check-result API loads authoritative Evidence IDs, saves
-immutable results, and appends `score_changed` in one transaction. Because a
-trusted human approval API is not implemented yet, approval-required
-`not_applicable` findings remain closed. Frozen Evidence Board persistence is
-also not implemented yet, so the API currently validates same-Run Evidence but
-cannot yet prove that the submitted `evidence_board_version` exists as a frozen
-Board. Freeze behavior, the orchestrator subprocess, SSE, approval records,
-and onchain writes are not implemented yet.
+catalog binding. Rust freezes normalized Evidence Boards and canonical
+Manifests from persisted same-Run Evidence, saves them immutably with a
+Trust-Core-owned `evidence_board_frozen` event, and requires that scoring
+reference an existing frozen Board. The check-result API saves immutable
+results and appends `score_changed` in one transaction. Because a trusted human
+approval API is not implemented yet, approval-required `not_applicable`
+findings remain closed. Passport freeze and commitment Hashes, the orchestrator
+subprocess, SSE, approval records, and onchain writes are not implemented yet.
 
 ## Docker
 

@@ -14,7 +14,8 @@ use crate::{
     domain::{
         AddIdentifierRequest, AppendRunEventRequest, Artifact, CheckResults,
         CheckResultsSubmission, CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest,
-        CreateToolRequest, Evidence, ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
+        CreateToolRequest, Evidence, EvidenceFreezeResult, FreezeEvidenceBoardRequest,
+        ResolveToolRequest, Run, RunDetails, RunEvent, Tool,
     },
     repository::Repository,
     services::{DEFAULT_MAX_STORED_BYTES, ServiceError, StorageService, TrustCoreService},
@@ -79,6 +80,14 @@ pub fn app_with_storage(pool: SqlitePool, storage: StorageService) -> Router {
         .route(
             "/api/runs/{run_id}/check-results",
             post(create_check_results),
+        )
+        .route(
+            "/api/runs/{run_id}/evidence-board/freeze",
+            post(freeze_evidence_board),
+        )
+        .route(
+            "/api/runs/{run_id}/evidence-board/{version}",
+            get(get_evidence_freeze),
         )
         .route(
             "/api/runs/{run_id}/artifacts",
@@ -148,6 +157,27 @@ async fn create_check_results(
         .create_check_results(&run_id, submission)
         .await?;
     Ok((StatusCode::CREATED, Json(check_results)))
+}
+
+async fn freeze_evidence_board(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    payload: Result<Json<FreezeEvidenceBoardRequest>, JsonRejection>,
+) -> ApiResult<(StatusCode, Json<EvidenceFreezeResult>)> {
+    let Json(request) = payload.map_err(ApiError::invalid_json)?;
+    let freeze = state
+        .service
+        .freeze_evidence_board(&run_id, request)
+        .await?;
+    Ok((StatusCode::CREATED, Json(freeze)))
+}
+
+async fn get_evidence_freeze(
+    State(state): State<AppState>,
+    Path((run_id, version)): Path<(String, u64)>,
+) -> ApiResult<Json<EvidenceFreezeResult>> {
+    let freeze = state.service.get_evidence_freeze(&run_id, version).await?;
+    Ok(Json(freeze))
 }
 
 async fn create_tool(

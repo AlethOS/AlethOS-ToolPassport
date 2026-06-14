@@ -1,6 +1,7 @@
 mod artifact;
 mod check_results;
 mod evidence;
+mod evidence_freeze;
 mod run;
 mod run_event;
 mod tool;
@@ -12,6 +13,11 @@ pub use check_results::{
     FindingSubmission, Rating,
 };
 pub use evidence::{CreateEvidenceRequest, Evidence, EvidenceSourceType};
+pub use evidence_freeze::{
+    ClaimStatus, EvidenceBoardClaim, EvidenceBoardGap, EvidenceFreezeResult, EvidenceManifestEntry,
+    FreezeEvidenceBoardRequest, FrozenEvidenceBoard, FrozenEvidenceManifest, GapPriority,
+    GapStatus,
+};
 pub use run::{AuditBinding, CreateRunRequest, Run, RunDetails, RunStatus, ToolInput};
 pub use run_event::{AppendRunEventRequest, RunEvent, RunEventType, ZERO_HASH};
 pub use tool::{AddIdentifierRequest, CreateToolRequest, ExternalIdentifier, Tool, ToolType};
