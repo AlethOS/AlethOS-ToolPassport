@@ -116,8 +116,12 @@ builds a deterministic JCS + SHA-256 hash chain over append-only Run Events.
 Stage 6 has published strict shared contracts for untrusted finding
 submissions, Rust-owned deterministic check results, frozen Evidence Boards
 and Manifests, Passport v0.2, Provenance, and an independent Attestation
-Receipt. Deterministic scoring, freeze persistence/API, the orchestrator
-subprocess, SSE, approval records, and onchain writes are not implemented yet.
+Receipt. The Rust scoring core loads the versioned `0.3.0` Standard/Profile
+catalog, rejects incomplete or unversioned findings and cross-Run Evidence
+references, and deterministically computes rule points, dimension scores,
+total score, and high-risk-capped rating. Check-result API/persistence, freeze
+behavior, the orchestrator subprocess, SSE, approval records, and onchain
+writes are not implemented yet.
 
 ## Docker
 

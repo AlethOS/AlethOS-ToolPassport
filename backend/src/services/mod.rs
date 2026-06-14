@@ -14,8 +14,10 @@ use crate::{
 };
 
 mod normalizer;
+mod scoring;
 mod storage;
 
+pub use scoring::{ScoringError, score_check_results};
 pub use storage::{DEFAULT_MAX_STORED_BYTES, StorageError, StorageService};
 
 #[derive(Debug, Error)]
