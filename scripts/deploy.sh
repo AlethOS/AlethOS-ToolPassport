@@ -28,6 +28,19 @@ else
 fi
 cd "$PROJECT_ROOT"
 
+echo ">>> Setting up Python orchestrator..."
+cd "$ORCHESTRATOR_DIR"
+if command -v python3.13 &> /dev/null; then
+  python3.13 -m venv .venv --upgrade-deps
+  .venv/bin/python -m pip install -r requirements-dev.lock
+  .venv/bin/python -m pip install -r ../schemas/requirements.lock
+  .venv/bin/python -m pip install --no-deps -e .
+else
+  echo "ERROR: python3.13 is required for repository checks and deployment."
+  exit 1
+fi
+cd "$PROJECT_ROOT"
+
 echo ">>> Running repository checks..."
 scripts/check_all.sh
 
