@@ -11,7 +11,8 @@ use axum::{
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use std::{convert::Infallible, sync::Arc};
+use std::{collections::HashSet, convert::Infallible, sync::Arc};
+use tokio::sync::Mutex;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
@@ -35,6 +36,22 @@ use self::error::{ApiError, ApiResult};
 #[derive(Clone)]
 struct AppState {
     service: TrustCoreService,
+    investigations: InvestigationRegistry,
+}
+
+#[derive(Clone, Default)]
+struct InvestigationRegistry {
+    active_run_ids: Arc<Mutex<HashSet<String>>>,
+}
+
+impl InvestigationRegistry {
+    async fn claim(&self, run_id: &str) -> bool {
+        self.active_run_ids.lock().await.insert(run_id.to_owned())
+    }
+
+    async fn release(&self, run_id: &str) {
+        self.active_run_ids.lock().await.remove(run_id);
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -98,6 +115,7 @@ pub fn app_with_storage_and_submitter(
             broadcaster,
             attestation_submitter,
         ),
+        investigations: InvestigationRegistry::default(),
     };
 
     Router::new()
@@ -462,6 +480,15 @@ async fn launch_investigation(
     Path(run_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let run = state.service.get_run_details(&run_id).await?;
+    let run_id = run.run.run_id.to_string();
+    if !state.investigations.claim(&run_id).await {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "investigation_already_running",
+            "an investigation process is already active for this run",
+            serde_json::json!({ "run_id": run_id }),
+        ));
+    }
 
     let backend_url =
         std::env::var("BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
@@ -476,7 +503,7 @@ async fn launch_investigation(
     cmd.arg("scripts/live_audit.py")
         .arg(&run.run.canonical_url)
         .env("BACKEND_URL", &backend_url)
-        .env("RUN_ID", run.run.run_id.to_string())
+        .env("RUN_ID", &run_id)
         .env("PYTHONPATH", "src")
         .env("ORCHESTRATOR_LIVE_RESEARCH", &live_research)
         .env("CHECKPOINT_DB", &checkpoint_db)
@@ -485,20 +512,47 @@ async fn launch_investigation(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
-    let mut child = cmd.spawn().map_err(|error| {
-        ServiceError::InvalidRequest(format!("failed to launch orchestrator: {error}"))
-    })?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            state.investigations.release(&run_id).await;
+            return Err(ServiceError::InvalidRequest(format!(
+                "failed to launch orchestrator: {error}"
+            ))
+            .into());
+        }
+    };
     let pid = child.id();
+    let investigations = state.investigations.clone();
+    let completed_run_id = run_id.clone();
     tokio::spawn(async move {
         if let Err(error) = child.wait().await {
             tracing::warn!(%error, "failed to reap orchestrator process");
         }
+        investigations.release(&completed_run_id).await;
     });
 
     Ok(Json(serde_json::json!({
         "status": "launched",
         "mode": "start_or_resume",
-        "run_id": run.run.run_id.to_string(),
+        "run_id": run_id,
         "pid": pid,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InvestigationRegistry;
+
+    #[tokio::test]
+    async fn investigation_registry_allows_only_one_active_process_per_run() {
+        let registry = InvestigationRegistry::default();
+
+        assert!(registry.claim("run-1").await);
+        assert!(!registry.claim("run-1").await);
+        assert!(registry.claim("run-2").await);
+
+        registry.release("run-1").await;
+        assert!(registry.claim("run-1").await);
+    }
 }

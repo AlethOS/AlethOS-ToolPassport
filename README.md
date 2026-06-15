@@ -42,8 +42,10 @@ audit requests can start or resume long-running audits. It defaults to
 `data/toolpassport.db`, `runs/`, `data/orchestrator-checkpoints.sqlite`, and
 `127.0.0.1:8080`; all paths and the bind address are environment-overridable.
 It does not read `.env`; chain and optional service credentials must already be
-exported by the human operator. SQLx runs embedded SQLite migrations on startup.
-The current Trust Core slice implements:
+exported by the human operator. The Rust launcher rejects a second concurrent
+investigation for the same Run and reaps completed orchestrator processes. SQLx
+runs embedded SQLite migrations on startup. The current Trust Core slice
+implements:
 
 - `POST /api/runs` — create an audit run bound to an existing Tool (accepts `tool_id`)
 - `GET /api/runs`
