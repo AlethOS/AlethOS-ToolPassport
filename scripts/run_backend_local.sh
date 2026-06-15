@@ -2,6 +2,31 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+load_dotenv() {
+  local file="$1"
+  local line key value
+
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == export\ * ]] && line="${line#export }"
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+      if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then
+        value="${BASH_REMATCH[1]}"
+      fi
+      if [[ -z "${!key+x}" ]]; then
+        export "$key=$value"
+      fi
+    fi
+  done < "$file"
+}
+
+load_dotenv "$ROOT/.env"
+
 ORCHESTRATOR_PYTHON="${ORCHESTRATOR_PYTHON:-$ROOT/orchestrator/.venv/bin/python}"
 
 if [[ ! -x "$ORCHESTRATOR_PYTHON" ]]; then

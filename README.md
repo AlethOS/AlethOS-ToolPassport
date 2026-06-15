@@ -26,8 +26,8 @@ HTTPS mirrors are acceptable; lock files and project checks remain required.
 The existing orchestrator virtual environment also receives the pinned
 `jsonschema` tooling from `schemas/requirements.lock`; schema checks do not
 create a second Python virtual environment.
-The script does not read `.env`, install Foundry, start services, or perform
-wallet or chain operations.
+The script does not install Foundry, start services, or perform wallet or chain
+operations.
 
 Run individual development services with:
 
@@ -41,11 +41,11 @@ The local backend script configures the repository orchestrator so Dashboard
 audit requests can start or resume long-running audits. It defaults to
 `data/toolpassport.db`, `runs/`, `data/orchestrator-checkpoints.sqlite`, and
 `127.0.0.1:8080`; all paths and the bind address are environment-overridable.
-It does not read `.env`; chain and optional service credentials must already be
-exported by the human operator. The Rust launcher rejects a second concurrent
-investigation for the same Run and reaps completed orchestrator processes. SQLx
-runs embedded SQLite migrations on startup. The current Trust Core slice
-implements:
+It loads simple `KEY=VALUE` entries from `.env` without printing them; explicit
+environment variables passed to the script take precedence. The Rust launcher
+rejects a second concurrent investigation for the same Run and reaps completed
+orchestrator processes. SQLx runs embedded SQLite migrations on startup. The
+current Trust Core slice implements:
 
 - `POST /api/runs` — create an audit run bound to an existing Tool (accepts `tool_id`)
 - `GET /api/runs`
