@@ -26,7 +26,10 @@ RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
 
-RUN mkdir -p /app/data /app/runs \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/data /app/runs \
     && chown -R node:node /app
 
 COPY --from=backend-builder /tmp/toolpassport-backend /usr/local/bin/toolpassport-backend

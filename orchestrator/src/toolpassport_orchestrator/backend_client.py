@@ -61,6 +61,14 @@ class BackendClient:
             logger.warning("Backend create_run failed: %s", exc)
             return None
 
+    def get_run_details(self, run_id: str) -> dict[str, Any] | None:
+        """Load the Rust-owned Run snapshot and append-only events."""
+        try:
+            return self._get(f"/api/runs/{run_id}")
+        except httpx.HTTPError as exc:
+            logger.warning("Backend get_run_details failed: %s", exc)
+            return None
+
     def append_event(
         self,
         run_id: str,

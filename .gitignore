@@ -13,6 +13,7 @@ runs/*
 backend/runs/*
 !backend/runs/.gitkeep
 docs/devlog/
+design-qa.md
 
 # Rust
 target/

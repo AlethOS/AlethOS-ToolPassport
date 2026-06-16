@@ -10,15 +10,15 @@ use uuid::Uuid;
 use crate::{
     domain::{
         AddIdentifierRequest, AppendRunEventRequest, Approval, ApprovalDecision, Artifact,
-        AttestationCommitment, AttestationReceipt, AttestationStatus, AuditBinding, CheckResults,
-        CheckResultsSubmission, CreateApprovalRequest, CreateArtifactRequest,
-        CreateEvidenceRequest, CreateRunRequest, CreateToolRequest, Evidence, EvidenceFreezeResult,
-        EvidenceManifestEntry, ExternalIdentifier, FreezeEvidenceBoardRequest,
-        FreezePassportRequest, FrozenEvidenceBoard, FrozenEvidenceManifest, Passport,
-        PassportDimensionScores, PassportFreezeResult, PassportRisk, PassportScores,
-        PassportStatement, Provenance, ReasonCode, Recommendation, ResolutionResponse,
-        ResolutionStatus, ResolveToolRequest, Run, RunDetails, RunEvent, RunEventType, RunStatus,
-        Tool, ToolInput, ZERO_HASH,
+        AttestationCommitment, AttestationPreflight, AttestationReceipt, AttestationStatus,
+        AuditBinding, CheckResults, CheckResultsSubmission, CreateApprovalRequest,
+        CreateArtifactRequest, CreateEvidenceRequest, CreateRunRequest, CreateToolRequest,
+        Evidence, EvidenceFreezeResult, EvidenceManifestEntry, ExternalIdentifier,
+        FreezeEvidenceBoardRequest, FreezePassportRequest, FrozenEvidenceBoard,
+        FrozenEvidenceManifest, Passport, PassportDimensionScores, PassportFreezeResult,
+        PassportRisk, PassportScores, PassportStatement, Provenance, ReasonCode, Recommendation,
+        ResolutionResponse, ResolutionStatus, ResolveToolRequest, Run, RunDetails, RunEvent,
+        RunEventType, RunStatus, Tool, ToolInput, ZERO_HASH,
     },
     repository::{Repository, RepositoryError, canonical_sha256, sha256_hex},
 };
@@ -167,6 +167,13 @@ impl TrustCoreService {
 
     pub fn broadcaster(&self) -> &EventBroadcaster {
         &self.broadcaster
+    }
+
+    pub async fn attestation_preflight(&self) -> Result<AttestationPreflight, ServiceError> {
+        self.attestation_submitter
+            .preflight()
+            .await
+            .map_err(|error| ServiceError::AttestationSubmission(error.to_string()))
     }
 
     pub async fn create_run(&self, request: CreateRunRequest) -> Result<Run, ServiceError> {

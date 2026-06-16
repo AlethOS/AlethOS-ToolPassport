@@ -109,3 +109,29 @@ class GraphState(BaseModel):
     frozen_board: FrozenBoardRef | None = None
     check_results_ref: CheckResultsRef | None = None
     passport_sequence: int | None = None
+
+    @classmethod
+    def from_backend_run(
+        cls,
+        run: dict[str, Any],
+        *,
+        research_mode: Literal["mock", "live"] = "live",
+        research_budget: ResearchBudget | None = None,
+    ) -> GraphState:
+        """Build orchestration state from the Rust-owned immutable Run snapshot."""
+        tool = run["tool"]
+        binding = run["audit_binding"]
+        return cls(
+            run_id=run["run_id"],
+            goal=run["goal"],
+            research_mode=research_mode,
+            tool_id=run["tool_id"],
+            tool_name=tool["name"],
+            tool_type=tool["tool_type"],
+            canonical_url=run["canonical_url"],
+            target_revision="unresolved",
+            standard_version=binding["standard_version"],
+            profile_id=binding["profile_id"],
+            profile_version=binding["profile_version"],
+            research_budget=research_budget or ResearchBudget(),
+        )

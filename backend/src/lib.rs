@@ -5,10 +5,10 @@ pub mod services;
 
 pub use api::{app, app_with_storage, app_with_storage_and_submitter};
 pub use domain::{
-    Approval, ApprovalDecision, AttestationCommitment, AttestationReceipt, AttestationStatus,
-    AuditBinding, CheckResultsSubmission, CreateApprovalRequest, EvidenceFreezeResult, Finding,
-    FindingSubmission, FreezeEvidenceBoardRequest, FreezePassportRequest, PassportFreezeResult,
-    Rating, ToolType,
+    Approval, ApprovalDecision, AttestationCommitment, AttestationPreflight, AttestationReceipt,
+    AttestationStatus, AuditBinding, CheckResultsSubmission, CreateApprovalRequest,
+    EvidenceFreezeResult, Finding, FindingSubmission, FreezeEvidenceBoardRequest,
+    FreezePassportRequest, PassportFreezeResult, Rating, ToolType,
 };
 pub use repository::{canonical_sha256, connect_and_migrate, migrate, sha256_hex};
 pub use services::{

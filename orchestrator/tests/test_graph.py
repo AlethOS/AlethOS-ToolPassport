@@ -6,6 +6,7 @@ import pytest
 
 from toolpassport_orchestrator import GraphState, build_graph
 from toolpassport_orchestrator.fixtures import MOCK_TOOL, load_profile
+from toolpassport_orchestrator.nodes import profile_selector, skeptic_review
 from toolpassport_orchestrator.state import CheckFinding, ResearchBudget
 
 
@@ -92,7 +93,6 @@ def test_skeptic_review_downgrades_weak_high_risk() -> None:
 
     # Inject a pre-built state that is already at check_execution stage but with
     # only 1 evidence for the high_risk check — then run skeptic_review in isolation.
-    from toolpassport_orchestrator.nodes import skeptic_review
 
     weak_finding = CheckFinding(
         check_id=target_check_id,
@@ -132,3 +132,41 @@ def test_intake_rejects_empty_goal() -> None:
     )
     with pytest.raises(ValueError, match="goal must not be empty"):
         intake_normalization(bad_state)
+
+
+def test_state_from_backend_run_preserves_rust_audit_binding() -> None:
+    state = GraphState.from_backend_run(
+        {
+            "run_id": "00000000-0000-0000-0000-000000000030",
+            "goal": "Audit bound Run",
+            "tool_id": "github:langchain-ai/langgraph",
+            "canonical_url": "https://github.com/langchain-ai/langgraph",
+            "tool": {"name": "LangGraph", "tool_type": "agent_framework", "urls": []},
+            "audit_binding": {
+                "standard_id": "alethos-toolpassport",
+                "standard_version": "0.3.0",
+                "profile_id": "agent_framework",
+                "profile_version": "0.3.0",
+            },
+        }
+    )
+
+    assert state.tool_type == "agent_framework"
+    assert state.standard_version == "0.3.0"
+    assert state.profile_id == "agent_framework"
+    assert state.profile_version == "0.3.0"
+
+
+def test_profile_selector_preserves_binding_and_rejects_mismatch() -> None:
+    bound = _make_initial(
+        profile_id="agent_framework",
+        profile_version="0.3.0",
+        standard_version="0.3.0",
+    )
+    updates = profile_selector(bound)
+    assert updates["profile_id"] == "agent_framework"
+    assert updates["profile_version"] == "0.3.0"
+    assert updates["standard_version"] == "0.3.0"
+
+    with pytest.raises(ValueError, match="does not match Run binding"):
+        profile_selector(bound.model_copy(update={"profile_id": "generic"}))

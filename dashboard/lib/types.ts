@@ -345,6 +345,18 @@ export interface AttestationReceipt {
   confirmed_at: string | null;
 }
 
+export interface AttestationPreflight {
+  attestation_preflight_schema_version: "0.1.0";
+  ready: boolean;
+  expected_chain_id: number;
+  connected_chain_id: number;
+  signer_address: string;
+  signer_balance_wei: string;
+  registry_contract: string;
+  registry_code_present: boolean;
+  issues: string[];
+}
+
 // ── Events list ─────────────────────────────────────────────────────
 
 export interface EventListResponse {

@@ -232,12 +232,16 @@ Rust 尚未生成相应冻结产物时只显示明确待生成状态。
 Dashboard 不计算权威评分或 Hash，也不提供未经 Rust 后端的审批或链上写入。当前可在
 冻结 provenance 后通过 Rust 专用 API 记录不可变链下批准、Sepolia attestation 批准
 或拒绝；Sepolia 批准后可通过独立操作请求 Rust/Alloy 执行一次性广播和确认，并读取
-不可变 Attestation Receipt。失败尝试不会自动重发。详细迁移顺序记录在
+不可变 Attestation Receipt。Rust 提供不暴露 RPC 或私钥的公开 preflight，核验
+Sepolia chain、Signer 余额和 Registry 代码；审批 Registry 必须匹配运行时配置。
+失败尝试不会自动重发。详细迁移顺序记录在
 `docs/technical-design.md`。
 
 真实网络调研入口正在集成。该模式只读取 Run 绑定的规范 HTTPS 来源，并将网页保存为
 尚未映射的候选 Evidence；采集行为本身不代表来源支持任何 check。真实来源不可访问时
-系统保留明确缺口并生成有限结论，不使用 mock Evidence 冒充真实调研结果。
+系统保留明确缺口并生成有限结论，不使用 mock Evidence 冒充真实调研结果。后端关联的
+orchestrator 从 Rust Run 快照加载并保持 Standard/Profile 绑定；Board 冻结、确定性
+评分或 Passport/provenance 冻结失败时立即停止，不得继续进入人工审批。
 
 ## 10. 设计参考与后续方向
 

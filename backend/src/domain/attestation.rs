@@ -40,3 +40,16 @@ pub struct AttestationCommitment {
     pub chain_id: u64,
     pub registry_contract: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AttestationPreflight {
+    pub attestation_preflight_schema_version: String,
+    pub ready: bool,
+    pub expected_chain_id: u64,
+    pub connected_chain_id: u64,
+    pub signer_address: String,
+    pub signer_balance_wei: String,
+    pub registry_contract: String,
+    pub registry_code_present: bool,
+    pub issues: Vec<String>,
+}

@@ -10,8 +10,20 @@ import pytest
 from toolpassport_orchestrator.backend_client import BackendClient, set_backend_client
 from toolpassport_orchestrator.fixtures import MOCK_TOOL
 from toolpassport_orchestrator.graph import _instrument_node
-from toolpassport_orchestrator.nodes import human_review_gate, persist_check_results, skeptic_review
-from toolpassport_orchestrator.state import CheckFinding, FrozenBoardRef, GraphState
+from toolpassport_orchestrator.nodes import (
+    freeze_evidence_board,
+    human_review_gate,
+    passport_draft,
+    persist_check_results,
+    skeptic_review,
+)
+from toolpassport_orchestrator.state import (
+    CheckFinding,
+    CheckResultsRef,
+    EvidenceEntry,
+    FrozenBoardRef,
+    GraphState,
+)
 
 
 class FakeBackend:
@@ -41,6 +53,30 @@ class FakeBackend:
             "total_score": 40,
             "rating": "trial",
         }
+
+
+class RejectingBackend(FakeBackend):
+    def freeze_evidence_board(
+        self, run_id: str, request: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        return None
+
+    def freeze_passport(
+        self, run_id: str, request: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        return None
+
+
+class CapturingFreezeBackend(FakeBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.freeze_request: dict[str, Any] = {}
+
+    def freeze_evidence_board(
+        self, run_id: str, request: dict[str, Any]
+    ) -> dict[str, Any]:
+        self.freeze_request = request
+        return {"evidence_board": {"version": 1, "frozen_at": "2026-06-14T00:00:00Z"}}
 
 
 @pytest.fixture(autouse=True)
@@ -127,3 +163,60 @@ def test_human_gate_finishes_before_requesting_approval() -> None:
         "node_finished",
         "approval_required",
     ]
+
+
+def test_backend_freeze_failure_stops_before_evaluation() -> None:
+    backend = RejectingBackend()
+    set_backend_client(cast(BackendClient, backend))
+
+    with pytest.raises(RuntimeError, match="rejected the Evidence Board freeze"):
+        _instrument_node("freeze_evidence_board", freeze_evidence_board)(_state())
+
+    assert [event_type for _, event_type, _ in backend.events] == [
+        "node_started",
+        "error",
+    ]
+
+
+def test_frozen_claim_supports_reference_evidence_uuid() -> None:
+    backend = CapturingFreezeBackend()
+    set_backend_client(cast(BackendClient, backend))
+    evidence_id = "190a449e-0ed1-477a-b10a-a967b3f90790"
+    state = _state(
+        evidence_board=[
+            EvidenceEntry(
+                evidence_id=evidence_id,
+                source_type="official_docs",
+                source_url="https://example.com/docs",
+                title="Docs",
+                excerpt="Claim",
+                supports=["agent_framework.capability_boundaries"],
+            )
+        ]
+    )
+
+    freeze_evidence_board(state)
+
+    assert backend.freeze_request["claims"][0]["check_id"] == (
+        "agent_framework.capability_boundaries"
+    )
+    assert backend.freeze_request["claims"][0]["supports"] == [evidence_id]
+
+
+def test_passport_freeze_failure_and_missing_provenance_never_request_approval() -> None:
+    backend = RejectingBackend()
+    set_backend_client(cast(BackendClient, backend))
+    state = _state(
+        frozen_board=FrozenBoardRef(version=1),
+        check_results_ref=CheckResultsRef(
+            check_results_id="results-1",
+            evidence_board_version=1,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="rejected the Passport freeze"):
+        passport_draft(state)
+    with pytest.raises(RuntimeError, match="before provenance freeze"):
+        _instrument_node("human_review_gate", human_review_gate)(state)
+
+    assert not any(event_type == "approval_required" for _, event_type, _ in backend.events)

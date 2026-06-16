@@ -277,6 +277,69 @@ describe("TrustControlDesk", () => {
     expect(submitted).toBe(true);
   });
 
+  it("shows public Sepolia preflight readiness without exposing secrets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
+        if (path.endsWith("/attestation/preflight")) {
+          return response({
+            attestation_preflight_schema_version: "0.1.0",
+            ready: true,
+            expected_chain_id: 11_155_111,
+            connected_chain_id: 11_155_111,
+            signer_address: `0x${"c".repeat(40)}`,
+            signer_balance_wei: "1000000000000000",
+            registry_contract: `0x${"b".repeat(40)}`,
+            registry_code_present: true,
+            issues: [],
+          });
+        }
+        if (path === "/api/trust-core/runs") return response({ runs: [waitingRun] });
+        if (path.includes("/check-results") || path.includes("/evidence-board/") || path.includes("/passport/") || path.endsWith("/approval") || path.endsWith("/attestation")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: waitingRun, events });
+      }),
+    );
+
+    renderDesk();
+
+    expect(await screen.findByText("Attestation readiness")).toBeInTheDocument();
+    expect(screen.getByText(`0x${"c".repeat(40)}`)).toBeInTheDocument();
+    expect(screen.queryByText(/private_key|rpc_url/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a public preflight failure in the human review boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/health")) return response({ status: "ok", service: "toolpassport-backend" });
+        if (path.endsWith("/attestation/preflight")) {
+          return response(
+            {
+              code: "attestation_submission_failed",
+              message: "invalid attestation chain configuration: REGISTRY_CONTRACT: invalid string length",
+              details: {},
+            },
+            502,
+          );
+        }
+        if (path === "/api/trust-core/runs") return response({ runs: [waitingRun] });
+        if (path.includes("/check-results") || path.includes("/evidence-board/") || path.includes("/passport/") || path.endsWith("/approval") || path.endsWith("/attestation")) {
+          return response({ code: "not_found", message: "not found", details: {} }, 404);
+        }
+        return response({ run: waitingRun, events });
+      }),
+    );
+
+    renderDesk();
+
+    expect(await screen.findByText(/Preflight unavailable/)).toHaveTextContent("REGISTRY_CONTRACT");
+  });
+
   it("filters authoritative run rows and selects a different run", async () => {
     mockTrustCore([waitingRun, runningRun], {
       [waitingRun.run_id]: { run: waitingRun, events },
@@ -379,5 +442,51 @@ describe("TrustControlDesk", () => {
     expect(await screen.findByRole("button", { name: "Created" })).toBeInTheDocument();
     expect(requested).toContain("/api/trust-core/tools/create");
     expect(requested).toContain("/api/trust-core/runs/new-run/investigate");
+  });
+
+  it("shows the Trust Core conflict when an investigation is already active", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.includes("/health")) {
+          return response({ status: "ok", service: "toolpassport-backend" });
+        }
+        if (path === "/api/trust-core/runs") return response({ runs: [] });
+        if (path === "/api/trust-core/tools/resolve") {
+          return response({
+            resolution_version: "0.1.0",
+            status: "resolved",
+            normalized_identifiers: [],
+            tool_id: "github:example/new-tool",
+            candidate_tool_ids: [],
+            reason_codes: [],
+          });
+        }
+        if (path === "/api/trust-core/runs/create") {
+          return response({ ...runningRun, run_id: "new-run" }, 201);
+        }
+        if (path === "/api/trust-core/runs/new-run/investigate") {
+          return response(
+            {
+              code: "investigation_already_running",
+              message: "an investigation process is already active for this run",
+              details: { run_id: "new-run" },
+            },
+            409,
+          );
+        }
+        return response({ code: "not_found", message: "not found", details: {} }, 404);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderDesk();
+    await user.type(screen.getByPlaceholderText("https://github.com/owner/repo"), "https://github.com/example/new-tool");
+    await user.click(screen.getByRole("button", { name: "Audit" }));
+
+    expect(
+      await screen.findByText("an investigation process is already active for this run"),
+    ).toBeInTheDocument();
   });
 });

@@ -61,17 +61,30 @@ def main() -> None:
         set_backend_client(backend)
         print(f"Backend: {backend_url}")
 
-    initial = GraphState(
-        run_id=run_id,
-        goal=f"Audit {owner}/{repo} as a software tool",
-        research_mode="live",
-        tool_id=tool_id,
-        tool_name=repo,
-        tool_type="generic",
-        canonical_url=target_url,
-        target_revision="main",
-        research_budget=ResearchBudget(max_rounds=3, max_sources=30),
-    )
+    if backend:
+        details = backend.get_run_details(run_id)
+        if details is None:
+            raise RuntimeError(f"Run {run_id} is not available from the Rust Trust Core")
+        run = details["run"]
+        if run["canonical_url"] != target_url:
+            raise RuntimeError("CLI target URL does not match the Rust-owned Run snapshot")
+        initial = GraphState.from_backend_run(
+            run,
+            research_mode="live",
+            research_budget=ResearchBudget(max_rounds=3, max_sources=30),
+        )
+    else:
+        initial = GraphState(
+            run_id=run_id,
+            goal=f"Audit {owner}/{repo} as a software tool",
+            research_mode="live",
+            tool_id=tool_id,
+            tool_name=repo,
+            tool_type="generic",
+            canonical_url=target_url,
+            target_revision="unresolved",
+            research_budget=ResearchBudget(max_rounds=3, max_sources=30),
+        )
 
     print(f"max_rounds: {initial.research_budget.max_rounds}")
     print()
