@@ -77,6 +77,34 @@ on Sepolia on June 14, 2026:
 Read-only verification confirmed deployed bytecode is present and the target
 audit Run had an initial `recordCount` of zero before attestation.
 
+### Reference Sepolia Attestation
+
+The first real ToolPassport attestation for this repository was approved by the
+human operator and submitted through the Rust Trust Core on June 16, 2026:
+
+- Run: `f6da603d-8504-48a9-86b1-d97ee0587174`
+- Tool: `github:langchain-ai/langgraph`
+- Attestation receipt:
+  `e6216da7-fdea-4894-befc-41b604c2798a`
+- Transaction:
+  `0x60106343b951f8175efd54c85ac5374548616d252ff6f0c49e84f98d0efd85d1`
+- Explorer:
+  <https://sepolia.etherscan.io/tx/0x60106343b951f8175efd54c85ac5374548616d252ff6f0c49e84f98d0efd85d1>
+- Chain ID: `11155111`
+- Registry:
+  `0x2761b873fd95bb8b1faf2ccbfd385a5e656ece8c`
+- Passport hash:
+  `0x585ae6c8707004e24e084cbbc95fd35ae904ad5c8f7b68b08190e742e6dbe7fa`
+- Audit log hash:
+  `0x94ad2d3ffa542f643fbb14093f54b67ad8a2762910b1bf76fc3caf4993c6a6c4`
+- Evidence manifest hash:
+  `0xccc03725673f05d102cca313a4839023260cf4d22d7b58307a9c8efa6e3cef23`
+- Onchain run ID:
+  `0x801f5d2e5c6d92f0cf2597df6d896c201904db138e58f6f8831d24843424590b`
+
+The backend persisted `attestation_submitted` and `attestation_confirmed` events
+and moved the Run to `success`.
+
 ## Attestation Submission Boundary
 
 The Dashboard records a Sepolia-specific approval first. A separate

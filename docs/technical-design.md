@@ -792,9 +792,9 @@ URL loader 必须限制协议、域名策略、响应大小、超时和重定向
 | Evidence / Artifact | Stage 4 已实现严格 schema、SQLx 迁移、StorageService、API 和创建事件 | Implemented；Rust 分配 ID/路径、限制大小、计算实际字节 Hash，并在 DB 失败时清理文件；Orchestrator 接入、内容读取与前端展示待实现 |
 | Audit Standard / Profile | Stage 1 已完成 core schema、历史 `0.2.0` 和评分绑定 `0.3.0` Standard/四类 Profile，以及多版本离线 catalog 校验 | Compatible target inputs；Stage 3 已有离线 selector mock，生产级 selector 尚未接真实来源与 Run 持久化 |
 | Passport 与评分 | 已发布严格 Passport v0.2、Check Result submission/stored、冻结 Board/Manifest 与 Provenance 契约，并实现 Rust 确定性评分核心、Run catalog 绑定、冻结 Board/Manifest、四个承诺 Hash 与 Passport/Provenance 冻结持久化/API | Partial；推理输入与 Rust-owned totals 已分离，可信 N/A 人工批准仍待实现 |
-| `web3_attestation` | 历史 v0.1 保留该字段；v0.2 已移除并发布独立 Receipt schema | Contract resolved；Receipt 持久化与测试网提交仍待 Stage 8 |
+| `web3_attestation` | 历史 v0.1 保留该字段；v0.2 已移除并发布独立 Receipt schema | Implemented；Receipt 持久化与经人工批准的一次性 Sepolia 提交已由 Stage 8 完成 |
 | Audit Log Hash | 已实现按 sequence 序的 JCS+SHA-256 哈希链 | Resolved；`auditLogHash` 定义为 `provenance_frozen` 事件哈希，Stage 6 实现冻结边界 |
-| Dashboard | 已实现双语 Trust Control Desk、Run/Event 轮询、创建调查、真实冻结产物视图和绑定 provenance 的 approval UI | Partial；尚无签名或链上写入 |
+| Dashboard | 已实现双语 Trust Control Desk、Run/Event 轮询、创建调查、真实冻结产物视图、绑定 provenance 的 approval UI、Sepolia preflight 与 Receipt 展示 | Implemented for MVP；签名和链上写入仍只通过 Rust 后端执行且需要人工批准 |
 | Registry | 最小 commitment 合约和 Foundry tests 已实现 | Compatible；按 `toolId -> runId` 聚合，并保存三个 Hash、auditor 和 timestamp；链下 Tool Registry 仍待实现 |
 | README | 已准确标记当前未实现能力 | Compatible；实现每个迁移阶段后继续同步 |
 
